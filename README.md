@@ -1,4 +1,4 @@
-# sagehydrology
+# SAGEhydrology
 
 CONUS Hydrologic Modeling Using Analytic Gradients 
 Jasper A. Vrugt and Jonathan Frame
