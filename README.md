@@ -1,4 +1,4 @@
-# SAGEhydrology: SAGE + SITE Software Report (with GUI)
+# SAGEhydrology
 **Version:** v1.0  
 **Maintainer:** Jasper A. Vrugt (UC Irvine)
 
@@ -70,7 +70,7 @@ root/
     hourly/
 ```
 
-If `Data/` is not created automatically, you can create it manually.
+If `Data/` is not created automatically, you can create it manually or use GUI-assisted data installation capabilities.
 
 ### 2.3 Install the data (required before running SAGE/SITE)
 
@@ -85,14 +85,16 @@ Follow the download, unzip, and rename procedures in Section **7**.
 If you prefer not to manually download and rename folders, the **SITE GUI** provides buttons that call the installer and place files into the canonical layout.
 
 1. In MATLAB, go to:
+   - `root/SAGEhydrology/SAGE/gui/`
+     or
    - `root/SAGEhydrology/SITE/gui/`
-2. Run:
-   - `SITE_ui`
-3. Go to the **Paths** tab.
-4. Under the **Data** path, use the download buttons:
+3. Run:
+   - `SAGE_ui` or `SITE_ui`
+4. Go to the **Paths** tab.
+5. Under the **Data** path, use the download buttons:
    - **Download Daily Data**
    - **Download Hourly Data**
-5. Button visibility and enable/disable logic:
+6. Button visibility and enable/disable logic:
    - The **Daily** button is enabled only if daily data are not detected at  
      `root/Data/daily/v1p2/forcing` and `root/Data/daily/v1p2/streamflow`.
    - The **Hourly** button is enabled only if hourly data are not detected at  
@@ -352,23 +354,16 @@ For bugs, feature requests, or questions, please contact:
 **Paper 1**: https://arxiv.org/pdf/2602.06429<br>
 **Title**: Reclaiming First Principles: A Differentiable Framework for Conceptual Hydrologic Models<br>
 **Authors**: Jasper A. Vrugt, Jonathan M. Frame and E. Bollman<br>
-**Addresses**: Dept. of Civil and Environmental Engineering, UC Irvine, USA, E-mail: jasper@uci.edu<br>
-           Dept. of Geological Sciences, University of Alabama, Tuscaloosa, USA, E-mail: jmframe@ua.edu<br>
            
 **Abstract**: Conceptual hydrologic models remain the cornerstone of rainfall-runoff modeling, yet their calibration is often slow and numerically fragile. Most gradient-based parameter estimation methods rely on finite-difference approximations or automatic differentiation frameworks (e.g., JAX, PyTorch and TensorFlow), which are computationally demanding and introduce truncation errors, solver instabilities, and substantial overhead. These limitations are particularly acute for the ODE systems of conceptual watershed models. Here we introduce a fully analytic and computationally efficient framework for differentiable hydrologic modeling based on exact parameter sensitivities. By augmenting the governing ODE system with sensitivity equations, we jointly evolve the model states and the Jacobian matrix with respect to all parameters. This Jacobian then provides fully analytic gradient vectors for any differentiable loss function. These include classical objective functions such as the sum of absolute and squared residuals, widely used hydrologic performance metrics such as the Nash-Sutcliffe and Kling-Gupta efficiencies, robust loss functions that down-weight extreme events, and hydrograph-based functionals such as flow-duration and recession curves. The analytic sensitivities eliminate the step-size dependence and noise inherent to numerical differentiation, while avoiding the instability of adjoint methods and the overhead of modern machine-learning autodiff toolchains. The resulting gradients are deterministic, physically interpretable, and straightforward to embed in gradient-based optimizers. Overall, this work enables rapid, stable, and transparent gradient-based calibration of conceptual hydrologic models, unlocking the full potential of differentiable modeling without reliance on external, opaque, or CPU-intensive automatic-differentiation libraries. <br>
 
 **Paper 2**: https://egusphere.copernicus.org/preprints/2026/egusphere-2026-693/egusphere-2026-693.pdf <br>
 **Title**: CONUS Hydrologic Modeling Using Analytic Gradients <br>
 **Authors**: Jasper A. Vrugt and Jonathan Frame<br>
-**Addresses**: Dept. of Civil and Environmental Engineering, UC Irvine, USA, E-mail: jasper@uci.edu<br>
-           Dept. of Geological Sciences, University of Alabama, Tuscaloosa, USA, E-mail: jmframe@ua.edu<br>
            
 Abstract: We introduce SAGE (Sensitivity-Aware Gradient Estimation), a new framework for scalable and physics-consistent training of hydrologic models that leverages analytic forward sensitivities to enable exact and efficient gradient-based learning of model parameters from catchment attributes. Unlike existing approaches that rely on finite-difference approximations, automatic differentiation, or surrogate emulators, SAGE propagates exact derivatives through physically based dynamical systems using analytically derived sensitivity equations. This eliminates the need for repeated model evaluations, substantially reduces computational cost, and preserves the interpretability and structural integrity of process-based hydrologic models. We demonstrate SAGE in a large-sample hydrology experiment using the CAMELS data set, comprising 531 hydrologically valid catchments across the contiguous United States. A feedforward neural network maps static catchment attributes to the parameter space of a conceptual rainfall-runoff model, while exact gradients of the loss function with respect to network weights are computed through analytic sensitivity propagation of the governing ordinary differential equations. Compared to conventional training strategies based on numerical differentiation or automatic differentiation, SAGE achieves machine-precision agreement with reference gradients while reducing computational cost by several orders of magnitude. To assess cross-basin model performance, we further introduce a new integrated distributional skill score based on the empirical cumulative distribution function of Nash-Sutcliffe efficiency (NSE) values across basins. Rather than summarizing performance using a single quantile such as the median NSE, the proposed score quantifies the distance between the observed basin-wise NSE distribution and the ideal degenerate distribution at NSE = 1. This distributional skill score provides a more robust and informative measure of large-sample model skill and enables objective comparison of learning strategies at continental scale. Together, SAGE and the proposed Vrugt-Frame loss score form a unified framework for both training and evaluating physics-based hydrologic models in large-sample settings and offer a new pathway toward continental-scale, attribute-conditioned calibration that is both computationally tractable and physically interpretable.<br>
 
 **Paper 3**: Continental-Scale Hydrologic Model Training at Hourly Resolution with Sensitivity-Aware Gradient Estimation <br>
 **Title**: Jasper A. Vrugt, Jonathan Frame and Yifu Gao <br>
-**Addresses**: Dept. of Civil and Environmental Engineering, UC Irvine, USA, E-mail: jasper@uci.edu <br>
-           Dept. of Geological Sciences, University of Alabama, Tuscaloosa, USA, E-mail: jmframe@ua.edu <br>
-           School of Atmospheric Sciences, Nanjing University of Information Science and Technology, Nanjing, Jiangsu, China, E-mail: gaoyifu@nuist.edu.cn <br>
 
 Abstract: We implement SAGE (Sensitivity-Aware Gradient Estimation), a framework for scalable and physics-consistent training of hydrologic models, to the demanding setting of hourly large-sample hydrology. Training process-based rainfall--runoff models at hourly resolution remains computationally prohibitive for many automatic differentiation (AD) workflows due to the length of multi-year trajectories and the associated memory and computational overhead of differentiating through dynamical systems. SAGE circumvents these limitations by propagating \emph{analytic forward sensitivities} through the governing ordinary differential equations, enabling exact gradients of the loss function with respect to both model parameters and attribute-to-parameter mapping weights without repeated model evaluations, numerical differencing, or reverse-mode AD through the full time history. We demonstrate SAGE using approximately six years of hourly forcing and discharge data per basin (including one year of spin-up, three years of training, and two years of validation) for roughly 500 CAMELS catchments across the contiguous United States. On an older desktop CPU (Intel(R) Core(TM) i7-10700T @ 2.00\,GHz; 8 cores), a single SAGE iteration over all 500 basins requires only about 50-60 seconds, establishing that exact, physics-consistent gradient-based learning at continental scale is computationally tractable at hourly resolution on commodity hardware. We benchmark SAGE against single-site training experiments for six conceptual hydrologic models including \texttt{hymod}, \texttt{hmodel}, \texttt{sacsma}, \texttt{Xinanjiang}, \texttt{gr4j}, and \texttt{hbv}, and assess generalization under temporal validation, spatial validation, and spatiotemporal validation using conventional goodness-of-fit metrics and the recently proposed Vrugt-Frame interbasin skill score. Overall, hourly-resolution skill is qualitatively consistent with daily-resolution findings, with basin-wise performance distributions shifted downward by roughly 0.1 in Nash-Sutcliffe efficiency (NSE). Among the tested models, Xinanjiang achieves the strongest predictive performance and learns the most effective attribute-parameter relationships for validation basins, whereas HBV generalizes poorly in comparison. These results position SAGE as a practical pathway toward rapid, continental-scale, attribute-conditioned calibration at hourly resolution, a regime that remains challenging for conventional AD-based differentiable modeling frameworks.
