@@ -9,6 +9,11 @@ The graphical user interface is distributed as a compiled application through
 the [GitHub Releases](https://github.com/jaspervrugt/SAGEhydrology/releases)
 page; its source code is not part of this repository.
 
+The SAGE GUI can automatically download, extract, organize, and register the
+supported regional hydrologic and meteorological datasets. Users therefore do
+not need to locate and arrange these data files manually for the standard
+regional workflows.
+
 ## Repository contents
 
 ```text
@@ -34,6 +39,13 @@ MATLAB Runtime R2026a, which the installer can obtain from MathWorks. macOS
 builds are published separately because standalone applications and MEX files
 are platform-specific.
 
+After installation, select a supported region and temporal resolution in the
+GUI. SAGE identifies missing data and offers the corresponding download and
+installation controls. The GUI downloads the source archives, extracts them,
+applies the directory and naming conventions expected by SAGE, and prepares
+the data for basin selection and quality screening. Manual data installation
+remains available for users who already maintain local dataset copies.
+
 ### MATLAB source
 
 1. Clone or download this repository.
@@ -43,9 +55,11 @@ are platform-specific.
 4. Compile platform-specific MEX kernels when required by the selected model
    and execution backend.
 
-The software does not redistribute CAMELS or other regional datasets. Consult
-the original dataset providers for their download instructions, citations, and
-licenses.
+The software does not bundle or redistribute CAMELS and other regional
+datasets inside the source repository or application installer. Instead, the
+GUI automates retrieval from the supported original data sources. Dataset use
+remains subject to each provider's availability, citation requirements, and
+license.
 
 ## Citation
 
