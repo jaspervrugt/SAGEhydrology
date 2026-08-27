@@ -49,7 +49,8 @@ remains available for users who already maintain local dataset copies.
 ### MATLAB source
 
 1. Clone or download this repository.
-2. Place externally obtained regional datasets in the layout selected by SAGE.
+2. Use the GUI's automatic data installation, or place existing regional
+   datasets manually in the layout selected by SAGE.
 3. Open `examples/demo_SAGE.mlx`, select the SAGE root directory, and review
    the configuration before running it.
 4. Compile platform-specific MEX kernels when required by the selected model
