@@ -19,6 +19,7 @@ regional workflows.
 ```text
 docs/                    Documentation graphics and model schematics
 examples/demo_SAGE.mlx   Illustrated SAGE Live Script
+examples/user_model/     Editable user-model plug-in template
 flags/                   Regional flag assets
 maps/                    Map assets and Natural Earth metadata
 models/                  Hydrologic models and analytic sensitivity kernels
@@ -55,6 +56,25 @@ remains available for users who already maintain local dataset copies.
    the configuration before running it.
 4. Compile platform-specific MEX kernels when required by the selected model
    and execution backend.
+
+### User-defined hydrologic model
+
+The repository includes a clean user-model template in
+`examples/user_model/`. Copy this directory to the SAGE workspace root so that
+it sits next to `Data/` and `SAGEhydrology/`:
+
+```text
+SAGE workspace/
+|-- Data/
+|-- SAGEhydrology/
+`-- user_model/
+```
+
+Edit the copied C++ model and metadata files, run `make_user_model_info`, and
+compile the platform-specific plug-in with `user_model_compile`. Compiled MEX
+files are intentionally excluded from the template because they must match the
+user's operating system and MATLAB release. The compiled GUI distribution can
+use the same external `user_model/` workspace directory.
 
 The software does not bundle or redistribute CAMELS and other regional
 datasets inside the source repository or application installer. Instead, the
