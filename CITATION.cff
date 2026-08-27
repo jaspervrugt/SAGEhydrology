@@ -1,0 +1,19 @@
+cff-version: 1.2.0
+message: "If you use SAGEhydrology, please cite the software and relevant papers."
+title: "SAGEhydrology"
+type: software
+version: 1.0.0
+date-released: 2026-08-27
+authors:
+  - family-names: Vrugt
+    given-names: Jasper A.
+    affiliation: University of California, Irvine
+    email: jasper@uci.edu
+repository-code: "https://github.com/jaspervrugt/SAGEhydrology"
+license: BSD-3-Clause
+keywords:
+  - hydrology
+  - differentiable modeling
+  - analytic gradients
+  - sensitivity analysis
+  - large-sample hydrology

@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 600">
+  <rect width="900" height="600" fill="#fff"/>
+  <g transform="translate(450 300) rotate(-33.6901)">
+    <path d="M0-150a150 150 0 1 1 0 300 75 75 0 1 0 0-150 75 75 0 1 1 0-150z" fill="#cd2e3a"/>
+    <path d="M0 150a150 150 0 0 1 0-300 75 75 0 1 0 0 150 75 75 0 1 1 0 150z" fill="#0047a0"/>
+  </g>
+  <g fill="#000">
+    <g transform="translate(220 135) rotate(-33.6901)">
+      <rect x="-90" y="-36" width="180" height="24"/><rect x="-90" y="-12" width="180" height="24"/><rect x="-90" y="12" width="180" height="24"/>
+    </g>
+    <g transform="translate(680 465) rotate(-33.6901)">
+      <rect x="-90" y="-36" width="78" height="24"/><rect x="12" y="-36" width="78" height="24"/>
+      <rect x="-90" y="-12" width="180" height="24"/>
+      <rect x="-90" y="12" width="78" height="24"/><rect x="12" y="12" width="78" height="24"/>
+    </g>
+    <g transform="translate(680 135) rotate(33.6901)">
+      <rect x="-90" y="-36" width="78" height="24"/><rect x="12" y="-36" width="78" height="24"/>
+      <rect x="-90" y="-12" width="78" height="24"/><rect x="12" y="-12" width="78" height="24"/>
+      <rect x="-90" y="12" width="180" height="24"/>
+    </g>
+    <g transform="translate(220 465) rotate(33.6901)">
+      <rect x="-90" y="-36" width="180" height="24"/>
+      <rect x="-90" y="-12" width="78" height="24"/><rect x="12" y="-12" width="78" height="24"/>
+      <rect x="-90" y="12" width="180" height="24"/>
+    </g>
+  </g>
+</svg>

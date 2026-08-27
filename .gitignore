@@ -1,0 +1,37 @@
+# SAGE outputs and external data
+results/
+Data/
+cache/
+release/
+
+# GUI source is distributed only in compiled form
+gui/
+
+# Platform-specific build products
+*.mexw64
+*.mexa64
+*.mexmaci64
+*.dll
+*.exe
+*.dmg
+*.pkg
+*.app/
+*.obj
+*.o
+*.pdb
+*.lib
+*.exp
+
+# MATLAB/editor artifacts
+*.asv
+*.autosave
+*.bak
+*.tmp
+*.m~
+slprj/
+codegen/
+
+# Operating-system metadata
+.DS_Store
+Thumbs.db
+desktop.ini
