@@ -5957,19 +5957,18 @@ function local_position_left_ylabel(hY,desiredX)
 end
 
 function local_position_single_basin_ylabels(axForcing,axDischarge)
-%LOCAL_POSITION_SINGLE_BASIN_YLABELS Move full-width labels slightly in.
+%LOCAL_POSITION_SINGLE_BASIN_YLABELS Match multi-basin ylabel spacing.
 
-    desiredX = -0.0175;
     if isgraphics(axForcing)
         try
             local_position_left_ylabel( ...
-                axForcing.YAxis(1).Label,desiredX);
+                axForcing.YAxis(1).Label);
         catch
         end
     end
     if isgraphics(axDischarge)
         local_position_left_ylabel( ...
-            axDischarge.YLabel,desiredX);
+            axDischarge.YLabel);
     end
 end
 
@@ -7955,7 +7954,7 @@ function symbol = local_metric_symbol(metricTag)
         case {'NSE','KGE','JKGE'}
             symbol = sprintf('\\mathrm{%s}',upper(strtrim(tag)));
         otherwise
-            symbol = strrep(tag,'_','\\_');
+            symbol = strrep(tag,'_','\_');
     end
 end
 
@@ -7964,16 +7963,16 @@ function symbol = local_metric_median_symbol(metricTag)
 
     tag = upper(strtrim(char(string(metricTag))));
     if contains(lower(tag),'fdc')
-        symbol = '\\widehat{T}_{S_{\\rm fdc}}';
+        symbol = '\widehat{T}_{S_{\mathrm{fdc}}}';
         return
     end
     switch tag
         case 'NSE'
-            symbol = '\\widehat{T}_{\\rm nse}';
+            symbol = '\widehat{T}_{\mathrm{nse}}';
         case 'KGE'
-            symbol = '\\widehat{T}_{\\rm kge}';
+            symbol = '\widehat{T}_{\mathrm{kge}}';
         case 'JKGE'
-            symbol = '\\widehat{T}_{\\rm jkge}';
+            symbol = '\widehat{T}_{\mathrm{jkge}}';
         otherwise
             symbol = sprintf('\\widehat{T}_{%s}', ...
                 local_metric_symbol(metricTag));
