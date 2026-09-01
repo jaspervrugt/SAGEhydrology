@@ -93,6 +93,8 @@ function [A,id_gauge,gname,zone] = read_attribute_data( ...
     elseif strcmpi(schema.metadata.name_transform,'title_case_words')
         nameAll = local_title_case(nameAll,false);
     end
+    nameAll = local_apply_name_overrides( ...
+        nameAll,outputIdAll,schema.metadata);
 
     local_write_gauge_information( ...
         dirD,attributes,outputIdAll,nameAll,schema);
@@ -1011,8 +1013,15 @@ function local_write_gauge_information( ...
                 existingId = regexprep(existingId,'\.0+$','');
                 requestedId = strip(string(id_gauge(:)));
                 requestedId = regexprep(requestedId,'\.0+$','');
-                if all(ismember(requestedId,existingId))
-                    return
+                [found,location] = ismember(requestedId,existingId);
+                nameColumn = local_find_column(existing, ...
+                    {'gauge_name','station_name','name'},true);
+                requestedName = strip(string(gname(:)));
+                if all(found) && ~isempty(nameColumn)
+                    existingName = strip(string(existing.(nameColumn)));
+                    if all(existingName(location) == requestedName)
+                        return
+                    end
                 end
             end
         catch
@@ -1022,15 +1031,16 @@ function local_write_gauge_information( ...
 
     latitude = local_optional_numeric_column(attributes,{ ...
         'gauge_lat_dd','gauge_lat','gauge_latitude','latitude','lat', ...
-        'station_lat','station_latitude','LAT_GAGE'});
+        'station_lat','station_latitude','lat_outlet','LAT_GAGE'});
     longitude = local_optional_numeric_column(attributes,{ ...
         'gauge_lon_dd','gauge_lon','gauge_longitude','longitude','lon','long', ...
-        'station_lon','station_longitude','LONG_GAGE'});
+        'station_lon','station_longitude','long_outlet','lon_outlet', ...
+        'LONG_GAGE'});
     elevation = local_optional_numeric_column(attributes,{ ...
         'gauge_elev','gauge_elevation','elevation','elev', ...
         'station_elev','station_elevation','ELEV_GAGE_M'});
     area = local_optional_numeric_column(attributes,{ ...
-        'area_km2','area_calc','area','catchment_area_km2', ...
+        'area_km2','area_calc','area','catchment_area','catchment_area_km2', ...
         'basin_area_km2','drainage_area_km2','DRAIN_SQKM'});
     if all(isnan(area))
         area = local_optional_numeric_column(attributes,{ ...
@@ -1046,7 +1056,9 @@ function local_write_gauge_information( ...
     overview = table(gauge_id,gauge_name,gauge_lat,gauge_lon, ...
         gauge_elev,area_km2);
 
-    temporaryFile = [tempname(dirD) '.txt'];
+    % Use the system temporary directory. Some synchronized folders remove
+    % just-created temporary files before movefile can reopen them.
+    temporaryFile = [tempname '.txt'];
     cleanup = onCleanup(@()local_delete_file(temporaryFile));
     try
         writetable(overview,temporaryFile, ...
@@ -1064,6 +1076,63 @@ function local_write_gauge_information( ...
             'Could not write %s: %s',outputFile,ME.message);
     end
     clear cleanup
+end
+
+function names = local_apply_name_overrides(names,ids,metadata)
+% Apply a version-controlled ID-to-name lookup after source metadata is read.
+% A missing or partial lookup never prevents loading; unmatched identifiers
+% retain the names supplied by the source dataset.
+
+    if ~isfield(metadata,'name_override_file') ...
+            || isempty(metadata.name_override_file)
+        return
+    end
+
+    lookupFile = char(string(metadata.name_override_file));
+    if ~isfile(lookupFile)
+        utilitiesRoot = fileparts(fileparts(mfilename('fullpath')));
+        lookupFile = fullfile(utilitiesRoot,'metadata',lookupFile);
+    end
+    if ~isfile(lookupFile)
+        warning('read_attribute_data:NameOverrideMissing', ...
+            'Station-name lookup not found: %s',lookupFile);
+        return
+    end
+
+    try
+        lookup = readtable(lookupFile,'TextType','string', ...
+            'VariableNamingRule','preserve');
+        idColumn = local_find_column(lookup, ...
+            {'gauge_id','station_id','official_id','id'},true);
+        nameColumn = local_find_column(lookup, ...
+            {'gauge_name','station_name','name'},true);
+        if isempty(idColumn) || isempty(nameColumn)
+            warning('read_attribute_data:NameOverrideColumns', ...
+                ['Station-name lookup %s must contain gauge_id and ' ...
+                'gauge_name columns.'],lookupFile);
+            return
+        end
+
+        lookupId = upper(strip(string(lookup.(idColumn))));
+        lookupId = regexprep(lookupId,'\.0+$','');
+        lookupName = strip(string(lookup.(nameColumn)));
+        valid = lookupId ~= "" & ~ismissing(lookupId) ...
+            & lookupName ~= "" & ~ismissing(lookupName);
+        lookupId = lookupId(valid);
+        lookupName = lookupName(valid);
+        [lookupId,uniqueRows] = unique(lookupId,'stable');
+        lookupName = lookupName(uniqueRows);
+
+        matchId = upper(strip(string(ids(:))));
+        matchId = regexprep(matchId,'\.0+$','');
+        [found,location] = ismember(matchId,lookupId);
+        names = string(names(:));
+        names(found) = lookupName(location(found));
+    catch ME
+        warning('read_attribute_data:NameOverrideRead', ...
+            'Could not apply station-name lookup %s: %s', ...
+            lookupFile,ME.message);
+    end
 end
 
 function value = local_optional_numeric_column(T,candidates)

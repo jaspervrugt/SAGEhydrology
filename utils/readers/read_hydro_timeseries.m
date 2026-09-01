@@ -485,7 +485,8 @@ function stamp = local_source_timestamp(dirData,schema)
         end
     end
     for i = 1:numel(patterns)
-        pattern = strrep(char(string(patterns{i})),'{gauge}','*');
+        pattern = strrep(char(string(patterns{i})),'{gauge02}','*');
+        pattern = strrep(pattern,'{gauge}','*');
         info = dir(fullfile(dirData,pattern));
         if ~isempty(info)
             stamp = max(stamp,max([info.datenum]));
@@ -1679,8 +1680,15 @@ end
 
 function file = local_file(dirData,pattern,id)
 
-    relative = strrep( ...
-        char(pattern),'{gauge}',char(id));
+    idText = char(string(id));
+    idNumber = str2double(idText);
+    if isfinite(idNumber) && idNumber == fix(idNumber)
+        idText02 = sprintf('%02d',idNumber);
+    else
+        idText02 = idText;
+    end
+    relative = strrep(char(pattern),'{gauge02}',idText02);
+    relative = strrep(relative,'{gauge}',idText);
 
     candidate = fullfile( ...
         char(string(dirData)),relative);

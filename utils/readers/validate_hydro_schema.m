@@ -71,9 +71,11 @@ function schema = validate_hydro_schema(schema,mode)
         schema.file = local_default(schema.file, ...
         'header_lines',0);
     
-        if ~contains(string(schema.file.pattern),'{gauge}')
+        gaugeTokens = ["{gauge}","{gauge02}"];
+        if ~any(contains(string(schema.file.pattern),gaugeTokens))
             error('validate_hydro_schema:MissingGaugeToken', ...
-                'schema.file.pattern must contain the token {gauge}.');
+                ['schema.file.pattern must contain {gauge} or ' ...
+                '{gauge02}.']);
         end
     
     elseif strcmp(schema.layout,'multi_file_per_basin')
@@ -94,9 +96,11 @@ function schema = validate_hydro_schema(schema,mode)
                     'schema.files.%s must be a scalar structure.',name);
             end
             local_require(fileSpec,'pattern');
-            if ~contains(string(fileSpec.pattern),'{gauge}')
+            gaugeTokens = ["{gauge}","{gauge02}"];
+            if ~any(contains(string(fileSpec.pattern),gaugeTokens))
                 error('validate_hydro_schema:MissingGaugeToken', ...
-                    'schema.files.%s.pattern must contain {gauge}.',name);
+                    ['schema.files.%s.pattern must contain {gauge} ' ...
+                    'or {gauge02}.'],name);
             end
             fileSpec = local_default(fileSpec,'format',schema.format);
             fileSpec.format = validatestring(lower(string(fileSpec.format)), ...
