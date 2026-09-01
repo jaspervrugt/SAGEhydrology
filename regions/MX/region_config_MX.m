@@ -112,6 +112,7 @@ function S = local_attribute_schema()
     S.id.strip = true;
     S.id.regex = {'^HYSETS[_-]',''; '\.0+$',''};
     S.metadata.name_sources = {'gauge_name','station_name','name'};
+    S.metadata.name_override_file = 'station_names_MX.csv';
     S.metadata.name_transform = 'title_case';
     S.region = 'CAMELS_MX';
     S.zone.region = 'MX';
