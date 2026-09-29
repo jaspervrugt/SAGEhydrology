@@ -5,9 +5,9 @@ function R = region_config_NA()
     R.resolutions={'Daily'}; R.default_resolution='Daily';
     R.basin_file_pattern='NA_%d_basins.txt';
     X=struct(); X.label='Daily'; X.dt=1;
-    % Of 51 source stations, 49 have at least 5% observed discharge in
-    % both default twenty-water-year periods.
-    X.basins.universe=49; X.basins.training=41; X.basins.evaluation=8;
+    % Request all source stations; period-specific eligibility is assessed
+    % by check_basins and enforced by filter_basins.
+    X.basins.universe=51; X.basins.training=43; X.basins.evaluation=8;
     X.period.spinup_days=365;
     X.period.manual.train_start='01/10/1998'; X.period.manual.train_end='30/09/2018';
     X.period.manual.eval_start='01/10/1978'; X.period.manual.eval_end='30/09/1998';

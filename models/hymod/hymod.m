@@ -1,55 +1,93 @@
-function varargout = hymod(par,mdl,data,ode,check)
+function varargout = hymod(par,mdl,data,ode,check,request)
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%HYMOD: Runge Kutta implementation of Hymod conceptual watershed model
-% SYNOPSIS: varargout = hymod(par,mdl,data,ode,check)
-%  par          dx1 vector of parameter values
-%   s_umax:par(1) maximum storage of surface reservoir (mm)
-%   beta:par(2)  beta coefficient (-)
-%   alfa:par(3)  flow partitioning factor (-)
-%   K_s:par(4)   residence time slow reservoir (1/T)
-%   K_f:par(5)   residence time quick reservoir (1/T)
-%   T_tr:par(6)  temperature threshold (°C)
-%   f_dd:par(7)  degree-day factor (mm/°C/T)
-%  mdl          structure with model state/parameter info
-%   .mcode       scalar numerical solution of watershed model
-%                 1 Runge Kutta implementation MATLAB
-%                 2 ode45 implementation MATLAB
-%                 3 Explicit Euler int_steps MATLAB
-%                 4 Runge Kutta implementation ode_hymod C++
-%   .y0          mx1 vector of initial states
-%   .pspace      0:hydrologic, 1:unit cube, 2:unconstrained parameters
-%   .th_min      dx1 vector of lower parameter values [= in pspace]
-%   .th_max      dx1 vector of upper parameter values [= in pspace]
-%   .par_names   1xd cell parameter names
-%   .id_train    1x2 vector of start and end index training period
-%   .id_eval     1x2 vector of start and end index evaluation period
-%   .eval_mode   evaluation design used during SAGE training
-%     'per'       training basins evaluated on evaluation period
-%     'bas'       evaluation basins evaluated on training period
-%     'basper'    evaluation basins evaluated on evaluation period
-%     'none'      no evaluation
-%   .tout        final model print time (scalar)
-%   .idx         1x2 vector of indices train&val periods
-%  data         structure with meteorological data and other info
-%   .P           (n+m)x1 record of precipitation (mm/T)
-%   .Ep          (n+m)x1 record of potential evapotranspiration (mm/T)
-%   .T           (n+m)x1 record of air temperature (°C)
-%  ode          structure with numerical settings ODE solver
-%   .InitStep    Initial time step
-%   .MaxStep     Maximum time step
-%   .MinStep     Minimum time step
-%   .RelTol      Relative tolerance
-%   .AbsTol      Absolute tolerance
-%   .Order       Order
-%   .maxiter     Maximum number of iterations
-%   .mem         storage of state variables [0: no, 1: yes]
-%  check        numerical check of J(x)_f and J(x)_th matrices (or not)
-%   0            do not check
-%   1            check Jacobian matrices of states and parameters
+%HYMOD HYMOD conceptual rainfall-runoff model.
+%
+%  Evaluates the hymod conceptual rainfall-runoff model using the selected
+%  ODE solver.
+%  A structured request returns only the requested observations, Jacobians,
+%  or states.
+%
+% SYNOPSIS:
+%   varargout = hymod(par,mdl,data,ode,check,request)
+%
+% INPUT ARGUMENTS:
+%   par             d-by-1 hydrologic parameter vector
+%    (1) s_umax      maximum surface-storage capacity (mm)
+%    (2) beta        soil-capacity shape coefficient (-)
+%    (3) alfa        quick-flow partition fraction (-)
+%    (4) K_s         slow-reservoir recession (1/T)
+%    (5) K_f         quick-reservoir recession (1/T)
+%    (6) T_tr        snow/rain temperature threshold (deg C)
+%    (7) f_dd        degree-day melt factor (mm/deg C/T)
+%   mdl             model and parameter metadata
+%    .mcode          solver: 1 RK2, 2 ode45, 3 Euler, 4 C++ MEX
+%    .y0             initial model states
+%    .pspace         parameter space: 0 native, 1 linear, 2 log
+%    .th_min         lower parameter bounds
+%    .th_max         upper parameter bounds
+%    .par_names      parameter names
+%    .id_train       training basin identifiers
+%    .id_eval        evaluation basin identifiers
+%    .eval_mode      evaluation mode
+%    .tout           requested output times
+%    .idx            selected output indices
+%   data            meteorological forcings
+%    .P              precipitation
+%    .Ep             potential evaporation
+%    .T              temperature
+%   ode             numerical integration settings
+%    .InitStep       initial integration step
+%    .MaxStep        maximum integration step
+%    .MinStep        minimum integration step
+%    .RelTol         relative error tolerance
+%    .AbsTol         absolute error tolerance
+%    .Order          integration order
+%    .maxiter        maximum solver iterations
+%    .mem            retain full state trajectory when 1
+%   check           1 validates Jacobians; 0 skips validation
+%   request         optional structured output request
+%    .obs            requested observations (Q, SWE, or SM)
+%    .jac            requested observation Jacobian names
+%    .states         whether model states are needed
+%
+% OUTPUT ARGUMENTS:
+%   varargout       legacy outputs or one structured result
+%    q_n             simulated discharge (legacy)
+%    J               discharge Jacobian (legacy)
+%    Jth             parameter Jacobian (legacy)
+%    Z               model states (legacy)
+%    out             structured result when request is supplied
+%     .failed         true if model evaluation failed
+%     .obs            requested simulated observations
+%     .jac            requested observation Jacobians
+%     .states         requested model states
+%
+% NOTES:
+%   Q and SWE; this model has no SM observation.
+%   ode.mem = 0 returns requested outputs without full state storage;
+%   ode45 or a states request retains the state trajectory.
+%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% © Written by Jasper A. Vrugt, Dec. 2011 / updated last Sept. 2026       %
+% University of California, Irvine                                        %
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
     if nargin < 5
         check = 0;          % no check of J(x)_f and J(x)_th
+    end
+    structured = nargin >= 6 ...
+        && ~isempty(request);
+    if ~structured, request = struct(); end
+    if structured
+        request = crr_request(request);
+        needJacobian = request.jacobian ...
+            || ~isempty(request.jac);
+        needHistory = ~isempty(request.states);
+        if needHistory
+            ode.mem = 1;
+        end
+    else
+        needJacobian = nargout > 1;
     end
     mcode = mdl.mcode;      % Formulation/language
                             % 1: Runge Kutta implementation MATLAB
@@ -75,9 +113,18 @@ function varargout = hymod(par,mdl,data,ode,check)
     rho = 1e-2;                 % smoothing coefficient
     fail = false;               % Default: model completes run
     id = m + (1:d)*m;           % Indices of sensitivity state variables
+    id_swe = 1 + (1:d)*m;       % SWE sensitivity indices
+    needSwe = structured ...
+        && any(request.obs == "SWE");
+    needJswe = structured ...
+        && any(request.jac == "SWE");
+    [needQ,needJq] = model_q_requests( ...
+        structured,request,needJacobian);
+    [q_n,J] = deal([]);
     if mem == 0
-        q_n = nan(n,1);
-        J = nan(n,d); 
+        [q_n,J] = model_q_arrays(n,d,needQ,needJq);
+        swe_n = nan(n,1);
+        Jswe = nan(n,d);
         ipr = mdl.idx(1);       % --> C++ code
     else
         Z = nan(ns,nvar); 
@@ -101,15 +148,15 @@ function varargout = hymod(par,mdl,data,ode,check)
                 varargout = {nan(n,1),nan(n,d),nan(d,1),Z}; return
             end
             dth_dnth = mdl.th_max - mdl.th_min; % dth/dnth
-            th = mdl.th_min + nth.*dth_dnth;    % hydrologic parameter values
+            th = mdl.th_min + nth.*dth_dnth;    % hydrologic parameters
             Jth = dth_dnth;                     % return dq_n/dnth
-        case 2 % unconstrained parameters (for training)
-            varth = par;
-            nth = 1./(1 + exp(-varth));         % normalized parameter values
+        case 2 % unconstrained parameter values
+            vth = par;
+            nth = 1./(1 + exp(-vth));           % normalized values
             dth_dnth = mdl.th_max - mdl.th_min; % dth/dnth
-            th = mdl.th_min + nth.*dth_dnth;    % hydrologic parameter values
-            dnth_dvarth = nth.*(1-nth);         % dnth/dvarth
-            Jth = dth_dnth .* dnth_dvarth;      % return dq_n/dvarth
+            th = mdl.th_min + nth.*dth_dnth;    % hydrologic parameters
+            dnth_dvth = nth.*(1-nth);           % dnth/dvth
+            Jth = dth_dnth .* dnth_dvth;        % return dq_n/dvth
     end
     
     switch mcode
@@ -184,8 +231,14 @@ function varargout = hymod(par,mdl,data,ode,check)
                     Z(s,1:nvar) = z;
                 else
                     if s >= ipr+1
-                        q_n(s-ipr) = z(m) - Z(m);
-                        J(s-ipr,1:d) = z(id) - Z(id);
+                        [q_n,J] = model_capture_q(z,Z,s-ipr, ...
+                            m,id,d,needQ,needJq,q_n,J);
+                        if needSwe
+                            swe_n(s-ipr) = z(1);
+                        end
+                        if needJswe
+                            Jswe(s-ipr,1:d) = z(id_swe);
+                        end
                     end
                     Z(1,1:nvar) = z;
                 end
@@ -260,8 +313,14 @@ function varargout = hymod(par,mdl,data,ode,check)
                         Z(s,1:nvar) = z;                % State at t
                     else
                         if s >= ipr+1
-                            q_n(s-ipr) = z(m) - Z(m);
-                            J(s-ipr,1:d) = z(id) - Z(id);
+                            [q_n,J] = model_capture_q(z,Z,s-ipr, ...
+                                m,id,d,needQ,needJq,q_n,J);
+                            if needSwe
+                                swe_n(s-ipr) = z(1);
+                            end
+                            if needJswe
+                                Jswe(s-ipr,1:d) = z(id_swe);
+                            end
                         end
                         Z(1,1:nvar) = z;
                     end
@@ -281,17 +340,34 @@ function varargout = hymod(par,mdl,data,ode,check)
             data.eps_m = eps_m;     % smoothing for min (°C)
             data.rho = rho;         % Smoothing parameter
             data.ipr = ipr;         % Time to print
+
+            if structured
+                out = crr_hymod(mdl.tout,Z(1,1:nvar)', ...
+                    data,ode,request);
+                if isfield(out,'jac')
+                    fields = fieldnames(out.jac);
+                    for jf = 1:numel(fields)
+                        name = fields{jf};
+                        out.jac.(name) = ...
+                            out.jac.(name) .* reshape(Jth,1,[]);
+                    end
+                end
+                varargout = {out}; return
+            end
     
-            if nargout == 1
+            if ~needJacobian
                 if mem == 1
-                    [Z,~] = crr_hymod(mdl.tout,Z(1,1:nvar)',data,ode);
+                    [Z,~] = crr_hymod(mdl.tout, ...
+                        Z(1,1:nvar)',data,ode);
                     q_n = diff(Z(mdl.idx(1):mdl.idx(2),m));
                 else
-                    [~,q_n] = crr_hymod(mdl.tout,Z(1,1:nvar)',data,ode);
+                    [~,q_n] = crr_hymod(mdl.tout, ...
+                        Z(1,1:nvar)',data,ode);
                 end
                 J = [];
             else
-                [Z,q_n,J] = crr_hymod(mdl.tout,Z(1,1:nvar)',data,ode);
+                [Z,q_n,J] = crr_hymod(mdl.tout, ...
+                    Z(1,1:nvar)',data,ode);
             end
     
     end
@@ -301,12 +377,26 @@ function varargout = hymod(par,mdl,data,ode,check)
         Z(s:ns,:) = repmat(Z(s-1,:), ns-s+1, 1);
     end
     if mem == 1
-        q_n = diff(Z(mdl.idx(1):mdl.idx(2),m));
-        switch nargout
-            case {2,3,4}
-                % diff appropriate elements of sensitivity state variables
-                J = diff(Z(mdl.idx(1):mdl.idx(2),id));
+        [q_n,J] = model_history_q(Z, ...
+            mdl.idx(1):mdl.idx(2),m,id,needQ,needJq,q_n,J);
+    end
+    if structured
+        if needJq
+            J = J .* reshape(Jth,1,[]);
         end
+        named = struct();
+        if needSwe ...
+                && mem == 0
+            named.obs.SWE = swe_n;
+        end
+        if needJswe ...
+                && mem == 0
+            named.jac.SWE = Jswe ...
+                .* reshape(Jth,1,[]);
+        end
+        out = crr_result( ...
+            q_n,J,Jth,Z,mdl,request,named);
+        varargout = {out}; return
     end
     if nargout == 1
         varargout = {q_n}; return
@@ -338,7 +428,7 @@ function [z,LTE] = rk2(t,z,h,th,data,T_sm,eps_m,rho,m,d)
 
 end
 
-%% 2. HYMOd augmented ode with sensitivities as state variables
+%% 2. HYMOD augmented ode with sensitivities as state variables
 function dzdt = hymod_aug_ode(t,z,th,data,T_sm,eps_m,rho,m,d)
 
     x = z(1:m);                                         % x = [Su Ss 
@@ -379,9 +469,9 @@ function [dxdt,dSdt,Jth_f,Jx_f] = hymod_odefcn(t,x,th,S,data,T_sm, ...
     Ep = data.Ep(id,1);     % Get current Ep (mm/T)
     T = data.T(id,1);      % Get current temperature (°C)
     
-    % -------------------------------------------------------------------------
+    % -----------------
     % Smooth primitives
-    % -------------------------------------------------------------------------
+    % -----------------
     smooth_pos = @(a,ep) 0.5*(a + sqrt(a.^2 + ep.^2));
     dsmooth_pos_da = @(a,ep) 0.5*(1 + a./sqrt(a.^2 + ep.^2));
     

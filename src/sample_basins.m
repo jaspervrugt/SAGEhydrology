@@ -1,59 +1,39 @@
 function [A,bas,latlon] = sample_basins(A_camels,id_gauge,bas, ...
     prd,gname,zone,dirD,file_u,file_s)  
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%SAMPLE_BASINS Divides the CONUS watersheds into training and evaluation
-% basins
-%  SYNOPSIS: [A,bas,latlon] = sample_basins(A_camels,id_gauge,bas,prd, ...
-%   gname,zone,dirD,file_u,file_s)
-%   A_camels    rxK_all matrix catchment attributes all CONUS watersheds
-%                [] -> skip attribute handling (SITE training)
-%   id_gauge    K_allx1 vector gauge catchment codes
-%   bas         structure basin information
-%    .K          total number of allowed basins
-%                [671 = all daily CAMELS / 531 = restricted daily /
-%                499 = hourly]
-%    .K_t        number of training watersheds
-%    .K_e        number of evaluation watersheds (OPTIONAL; default = 0)
-%    .sample     basin sampling mode
-%                'random' -> random train/evaluation selection
-%                'file'   -> user-defined file order
-%   prd         structure about training/evaluation/spin-up period
-%    .dt         Temporal data resolution [1:daily, 24:hourly]
-%    .dts        First day of training [d/m/y]
-%    .dte        Last day of training [d/m/y]
-%    .des        First day of evaluation [d/m/y]
-%    .dee        Last day of evaluation [d/m/y]
-%    .spinup     Spin up period in days
-%   gname       K_allx1 vector gauge basin names, state
-%   zone        INPUT: structure with hydroclimatic basin classification
-%               for all basins in id_gauge before sampling
-%    .id         (K_t+K_e)x1 string array with zone labels per basin
-%                e.g., "humid_rain", "subhumid_snow", "dry_rain"
-%    .num        (K_t+K_e)x1 numeric vector with integer zone identifiers
-%    .names      mx1 string array with unique zone names
-%    .aridity    (K_t+K_e)x1 vector of aridity index values
-%    .frac_snow  (K_t+K_e)x1 vector of snow-fraction values
-%   dirD        Main data directory with gauge_information.txt metadat file
-%   file_u      file with gauge codes of all available basins
-%               (the basin universe; e.g., 531_basins.txt,
-%               499_basins.txt, 671_basins.txt)
-%   file_s      split file with gauge codes of training and
-%               evaluation basins
-%               first K_t entries     -> training basins
-%               next  K_e entries     -> evaluation basins
-%               used only if bas.sample = 'file'
-%   A           OUTPUT: rxK matrix attributes K = K_t+K_e train/eval basins
-%   bas         OUTPUT: updated structure basin information
-%    .K          number of training and evaluation basins
-%    .r          number of basin attributes
-%    .id_t       K_tx1 vector integers training basins (in final list)
-%    .id_e       K_ex1 vector integers evaluation basins (in final list)
-%    .id_gauge    revised list gauge catchment codes (order: train; eval)
-%    .gname      corresponding gauge names (order: train; eval)
-%    .id_plot    display order [train sorted by gauge; eval sorted by gauge]
-%    .mode       assessment mode returned by get_assess_mode
-%    .zone       hydroclimatic zone structure for selected basins
-%   latlon      OUTPUT: (K_t+K_e)x2 matrix lat/lon (°) of K basins
+%SAMPLE_BASINS Select training and evaluation basins.
+%
+%  Samples or reads the basin split, reorders basin metadata, and returns
+%  attributes and coordinates.
+%
+% SYNOPSIS:
+%   [A,bas,latlon] = sample_basins(A_camels,id_gauge,bas, ...
+%       prd,gname,zone,dirD,file_u,file_s)
+%
+% INPUT ARGUMENTS:
+%   A_camels        attributes for all candidate basins; [] for SITE
+%   id_gauge        candidate gauge identifiers
+%   bas             basin counts and sampling settings
+%    .K_t            number of training basins
+%    .K_e            number of evaluation basins
+%    .sample         'random', 'zone', or 'file'
+%   prd             time resolution and training/evaluation dates
+%   gname           candidate basin names
+%   zone            candidate hydroclimatic classes
+%   dirD            regional data directory
+%   file_u          candidate basin-universe file
+%   file_s          optional prescribed basin-selection file
+%
+% OUTPUT ARGUMENTS:
+%   A               selected attribute matrix, r-by-K
+%   bas             updated selection and reordered basin metadata
+%    .id_t           training indices in final basin list
+%    .id_e           evaluation indices in final basin list
+%    .id_gauge       selected gauges, training first
+%    .gname          selected basin names
+%    .zone           selected hydroclimatic classes
+%   latlon          K-by-2 matrix of basin coordinates
+%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % © Written by Jasper A. Vrugt, Mar. 2026                                 %
 % University of California, Irvine                                        %
@@ -426,10 +406,10 @@ function [A,bas,latlon] = sample_basins(A_camels,id_gauge,bas, ...
         end
         
         iLat = find(ismember(vn, ...
-            ["lat","latitude","lat_wgs84", ...
+            ["gauge_lat","lat","latitude","lat_wgs84", ...
             "latitude_wgs84"]),1);
         iLon = find(ismember(vn, ...
-            ["lon","long","longitude", ...
+            ["gauge_lon","lon","long","longitude", ...
             "lon_wgs84","longitude_wgs84"]),1);
         
         if ~isempty(iLat) ...
@@ -514,6 +494,7 @@ end
 % helper: robust load of a numeric vector from .txt/.mat
 % ------------------------------------------------------
 function v = local_load_vec(fname,pad5)
+%LOCAL_LOAD_VEC Read a basin-identifier vector from file.
 
     if nargin < 2
         pad5 = false;
@@ -878,6 +859,7 @@ function id_ref = local_harmonize_de_reference(id_target,id_ref)
 end
 
 function id = local_id_key(x,pad5)
+%LOCAL_ID_KEY Normalize basin identifiers for matching.
 
     if nargin < 2
         pad5 = false;
@@ -903,6 +885,7 @@ function id = local_id_key(x,pad5)
 end
 
 function tf = local_has_prepared_basins(bas)
+%LOCAL_HAS_PREPARED_BASINS Test whether a prepared basin split is complete.
 
     tf = isstruct(bas) ...
         && isfield(bas,'K') ...
@@ -916,6 +899,7 @@ end
 
 function [A,bas,latlon] = local_use_prepared_basins( ...
     A_cns,ID,bas,prd,gname,zone,dirD)
+%LOCAL_USE_PREPARED_BASINS Apply a previously prepared basin split.
 
     id_pre = local_clean_basin_id(bas.id_gauge);
     id_all = local_clean_basin_id(ID);
@@ -975,6 +959,7 @@ function [A,bas,latlon] = local_use_prepared_basins( ...
 end
 
 function id = local_clean_basin_id(id)
+%LOCAL_CLEAN_BASIN_ID Remove quoting and whitespace from basin identifiers.
 
     id = string(id(:));
     id = strtrim(id);
@@ -985,6 +970,7 @@ function id = local_clean_basin_id(id)
 end
 
 function id = local_strip_de_prefix(id)
+%LOCAL_STRIP_DE_PREFIX Remove the CAMELS-DE identifier prefix.
 
     id = string(id(:));
     id = regexprep(id,'^DE','');
@@ -992,6 +978,7 @@ function id = local_strip_de_prefix(id)
 end
 
 function id_out = local_normalize_split_ids(id_in, id_univ)
+%LOCAL_NORMALIZE_SPLIT_IDS Match split identifiers to the basin universe.
 
     id_in   = string(id_in(:));
     id_univ = string(id_univ(:));

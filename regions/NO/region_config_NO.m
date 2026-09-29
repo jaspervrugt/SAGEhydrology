@@ -1,6 +1,6 @@
 function R=region_config_NO()
 %REGION_CONFIG_NO Defaults for Norway GRDC-Caravan.
-    R=region_config_GRDC('NO','Norway',206,196,163,33, ...
+    R=region_config_GRDC('NO','Norway',206,206,171,35, ...
         '01/10/1960','30/09/1980','01/10/1980','30/09/2000');
 
     % Declarative generic-reader schemas owned by this region module.

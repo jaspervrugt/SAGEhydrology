@@ -1,37 +1,26 @@
 function flag = force_compile(mdl,verbose)
-%FORCE_COMPILE Compile standalone MEX files for validated native cores.
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%FORCE_COMPILE Build standalone native model MEX files.
+%
+%  Compiles each selected MEX gateway with its matching native core.
 %
 % SYNOPSIS:
 %   flag = force_compile(mdl,verbose)
 %
-% INPUT:
-%   mdl         OPTIONAL model structure
-%    .mcode      numerical solution code; compilation requires mcode = 4
-%    .names      model names to compile
-%                default:
-%                ["hymod","hmodel","sacsma","xinanjiang", ...
-%                 "gr4jA","gr4jB","hbv","cfe_nwm"]
+% INPUT ARGUMENTS:
+%   mdl             optional model selection structure
+%    .mcode          solver code; 4 requests native MEX compilation
+%    .names          model names to compile; defaults to all native cores
+%   verbose         nonzero adds the verbose MEX compiler flag
 %
-%   verbose     OPTIONAL, 0/1. Add -v to the MEX command when nonzero.
+% OUTPUT ARGUMENTS:
+%   flag            build result: 1 success, 0 skipped, -1 failure,
+%                   -2 missing source file
 %
-% OUTPUT:
-%   flag         1  all requested models compiled successfully
-%                0  skipped because mdl.mcode ~= 4
-%               -1  one or more compilations failed
-%               -2  one or more required source files were missing
+% NOTES:
+%   Each model uses crr_<model>_mex.cpp and <model>.cpp.
 %
-% Each standalone model MEX is built from TWO source files:
-%
-%   crr_<model>_mex.cpp          MATLAB MEX gateway
-%   <model>.cpp                  MATLAB-independent native model
-%
-% The build intentionally uses the same MEX options as the individually
-% validated compile_crr_<model>_core_mex scripts:
-%
-%   mex('-R2018a','-O',...)
-%
-% Do NOT combine -R2018a with -largeArrayDims: recent MATLAB releases reject
-% that combination.
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
     if nargin < 2 ...
             || isempty(verbose)
@@ -43,7 +32,7 @@ function flag = force_compile(mdl,verbose)
         mdl = struct();
         mdl.mcode = 4;
         mdl.names = ["hymod","hmodel","sacsma","xinanjiang", ...
-                     "gr4jA","gr4jB","hbv","cfe_nwm"];
+                     "gr4jA","hbv","cfe_nwm"];
     end
 
     if ~isfield(mdl,'mcode') ...
@@ -54,7 +43,7 @@ function flag = force_compile(mdl,verbose)
     if ~isfield(mdl,'names') ...
             || isempty(mdl.names)
         mdl.names = ["hymod","hmodel","sacsma","xinanjiang", ...
-                     "gr4jA","gr4jB","hbv","cfe_nwm"];
+                     "gr4jA","hbv","cfe_nwm"];
     end
 
     if mdl.mcode ~= 4
@@ -107,9 +96,10 @@ function flag = force_compile(mdl,verbose)
         'sacsma',     'sacsma',      'sacsma',      'crr_sacsma'
         'xinanjiang', 'xinanjiang',  'xinanjiang',  'crr_xinanjiang'
         'gr4ja',      'gr4jA',       'gr4jA',       'crr_gr4jA'
-        'gr4jb',      'gr4jB',       'gr4jB',       'crr_gr4jB'
+
         'hbv',        'hbv',         'hbv',         'crr_hbv'
         'cfe_nwm',    'cfe_nwm',     'cfe_nwm',     'crr_cfe_nwm'
+
         };
 
     names = string(mdl.names(:));
@@ -122,8 +112,7 @@ function flag = force_compile(mdl,verbose)
         % Common aliases
         if req_name == "gr4j" || req_name == "gr4j-a"
             req_name = "gr4ja";
-        elseif req_name == "gr4j-b"
-            req_name = "gr4jb";
+
         end
 
         row = find(strcmpi(model_map(:,1),char(req_name)),1,'first');

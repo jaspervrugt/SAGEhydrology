@@ -8,6 +8,7 @@
 
 #include "mex.h"
 #include "xinanjiang.hpp"
+#include "../standalone_result.hpp"
 #include <algorithm>
 #include <cmath>
 #include <vector>
@@ -64,7 +65,8 @@ InputVector vector_view(const mxArray* a, const char* n)
 
 void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[])
 {
-    if (nrhs != 4 || nlhs > 4) {
+    const bool structured = nrhs == 5;
+    if ((nrhs != 4 && nrhs != 5) || (structured ? nlhs != 1 : nlhs > 4)) {
         mexErrMsgIdAndTxt("crr_xinanjiang:Usage",
                           "Need t_last,z0,data,options; <=4 outputs.");
     }
@@ -114,6 +116,8 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[])
     if (ma && !mxIsEmpty(ma)) {
         mem = (int)std::llround(mxGetScalar(ma));
     }
+    std::vector<std::string> obsNames,jacNames,stateNames; bool wantQ=false,wantJ=false,wantSwe=false,wantJswe=false,wantSm=false,wantJsm=false;
+    if(structured){obsNames=sage_standalone::names(prhs[4],"obs");jacNames=sage_standalone::names(prhs[4],"jac");stateNames=sage_standalone::names(prhs[4],"states");wantQ=sage_standalone::has(obsNames,"Q")||sage_standalone::flag(prhs[4],"q");wantJ=sage_standalone::has(jacNames,"Q")||sage_standalone::flag(prhs[4],"jacobian");wantSwe=sage_standalone::has(obsNames,"SWE");wantJswe=sage_standalone::has(jacNames,"SWE");wantSm=sage_standalone::has(obsNames,"SM");wantJsm=sage_standalone::has(jacNames,"SM");mem=stateNames.empty()?0:1;}
     int ipr = 1;
     const mxArray* ia = field(data, "ipr", false);
     if (ia && !mxIsEmpty(ia)) {
@@ -133,8 +137,9 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[])
     }
     const std::size_t zr = mem ? (std::size_t)(ns + 1) : 1u,
                       nq = (!mem && ipr <= ns) ? (std::size_t)(ns - ipr + 1) : 0u;
-    plhs[0] = mxCreateDoubleMatrix((mwSize)zr, (mwSize)nvar, mxREAL);
-    double *q = nullptr, *J = nullptr;
+    mxArray* Zmx = mxCreateDoubleMatrix((mwSize)zr, (mwSize)nvar, mxREAL);
+    if (!structured) plhs[0] = Zmx;
+    double *q=nullptr,*J=nullptr,*swe=nullptr,*Jswe=nullptr,*sm=nullptr,*Jsm=nullptr;std::vector<double> qb,Jb,sweb,Jsweb,smb,Jsmb;
     if (nlhs >= 2) {
         plhs[1] = (!mem && nq) ? mxCreateDoubleMatrix((mwSize)nq, 1, mxREAL)
                                : mxCreateDoubleMatrix(0, 0, mxREAL);
@@ -149,11 +154,16 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[])
             J = mxGetPr(plhs[2]);
         }
     }
+    if(structured&&!mem){if(wantQ){qb.assign(nq,0);q=qb.data();}if(wantJ){Jb.assign(nq*d,0);J=Jb.data();}if(wantSwe){sweb.assign(nq,0);swe=sweb.data();}if(wantJswe){Jsweb.assign(nq*d,0);Jswe=Jsweb.data();}if(wantSm){smb.assign(nq,0);sm=smb.data();}if(wantJsm){Jsmb.assign(nq*d,0);Jsm=Jsmb.data();}}
     sage_xinanjiang::Forcing F{P.ptr, Ep.ptr, T.ptr, std::min(P.n, std::min(Ep.n, T.n))};
-    sage_xinanjiang::OutputView O{mxGetPr(plhs[0]), q, J, zr, nvar, nq, (std::size_t)d};
+    sage_xinanjiang::OutputView O{mxGetPr(Zmx), q, J, zr, nvar, nq, (std::size_t)d};
+    O.swe=swe;O.Jswe=Jswe;O.sm=sm;O.Jsm=Jsm;
     bool fail =
-        sage_xinanjiang::run_into(ns, z0.ptr, z0.n, F, p, opt, mem != 0, ipr, nlhs >= 3, O);
-    if (nlhs >= 4) {
+        sage_xinanjiang::run_into(ns,z0.ptr,z0.n,F,p,opt,mem!=0,ipr,structured?(wantJ||wantJswe||wantJsm):nlhs>=3,O);
+    if (structured) {
+        if(mem)plhs[0]=sage_standalone::result(prhs[4],mxGetPr(Zmx),zr,ns,ipr,m,d,fail,{1,2});else{std::vector<sage_standalone::OutputChannel> c{{"Q",q,J},{"SWE",swe,Jswe},{"SM",sm,Jsm}};plhs[0]=sage_standalone::result(prhs[4],c,nq,d,mxGetPr(Zmx),zr,ns,ipr,m,fail);}
+        mxDestroyArray(Zmx);
+    } else if (nlhs >= 4) {
         plhs[3] = mxCreateLogicalScalar(fail);
     }
 }

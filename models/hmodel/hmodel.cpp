@@ -689,10 +689,13 @@ bool run_into(int ns,
         return true;
     }
     if (!mem && n_q > 0) {
-        if (!out.q || out.nq != (std::size_t)n_q) {
+        if ((!out.q && !out.J && !out.swe && !out.Jswe
+             && !out.sm && !out.Jsm)
+            || out.nq != (std::size_t)n_q) {
             return true;
         }
-        if (needJ && (!out.J || out.nj != (std::size_t)d)) {
+        if (needJ && ((!out.J && !out.Jswe && !out.Jsm)
+                      || out.nj != (std::size_t)d)) {
             return true;
         }
     }
@@ -720,8 +723,12 @@ bool run_into(int ns,
         zcur(z0, z0 + nvar), prev;
     std::fill(out.Z, out.Z + out.zrows * out.zcols, 0.0);
     if (!mem && n_q > 0) {
-        std::fill(out.q, out.q + out.nq, 0.0);
-        if (needJ) {
+        if (out.q) std::fill(out.q, out.q + out.nq, 0.0);
+        if (out.swe) std::fill(out.swe, out.swe + out.nq, 0.0);
+        if (out.Jswe) std::fill(out.Jswe, out.Jswe + out.nq*out.nj, 0.0);
+        if (out.sm) std::fill(out.sm, out.sm + out.nq, 0.0);
+        if (out.Jsm) std::fill(out.Jsm, out.Jsm + out.nq*out.nj, 0.0);
+        if (needJ && out.J) {
             std::fill(out.J, out.J + out.nq * out.nj, 0.0);
         }
     }
@@ -825,14 +832,25 @@ bool run_into(int ns,
             for (int j = 0; j < nvar; ++j) {
                 out.Z[(std::size_t)j] = zcur[j];
             }
-            if (ss >= ipr && out.q) {
-                out.q[k_out] = zcur[m - 1] - prev[m - 1];
+            if (ss >= ipr && (out.q || out.J || out.swe || out.Jswe
+                              || out.sm || out.Jsm)) {
+                if (out.q) out.q[k_out] = zcur[m - 1] - prev[m - 1];
+                if (out.swe) out.swe[k_out] = zcur[0];
+                if (out.sm) out.sm[k_out] = zcur[2];
                 if (needJ && out.J) {
                     for (int j = 0; j < d; ++j) {
                         const int idx = (j + 2) * m - 1;
                         out.J[(std::size_t)k_out + (std::size_t)n_q * j] =
                             zcur[idx] - prev[idx];
                     }
+                }
+                for (int j=0;j<d;++j) {
+                    if (out.Jswe)
+                        out.Jswe[(std::size_t)k_out+(std::size_t)n_q*j] =
+                            zcur[(j+1)*m];
+                    if (out.Jsm)
+                        out.Jsm[(std::size_t)k_out+(std::size_t)n_q*j] =
+                            zcur[(j+1)*m+2];
                 }
                 ++k_out;
             }

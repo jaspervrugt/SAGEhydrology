@@ -12,14 +12,14 @@ set(gcf,'Name', ...
     'NumberTitle','off', ...
     'color','w', ...
     'Units','inches', ...
-    'Position',[0.5 0.5 24 7.5]);
+    'Position',[0.5 0.5 16 5.6]);
 
 ax = gobjects(4,1);
 marginLeft = 0.055;
 marginRight = 0.020;
-panelBottom = 0.180;
-panelHeight = 0.680;
-panelWidth = panelHeight*(7.5/24);
+panelBottom = 0.170;
+panelHeight = 0.620;
+panelWidth = panelHeight*(5.6/16);
 gap = (1-marginLeft-marginRight-4*panelWidth)/3;
 for ii = 1:4
     panelLeft = marginLeft + (ii-1)*(panelWidth+gap);
@@ -39,7 +39,7 @@ med_ms = 6;
 % plot_SAGE. These are the former S_FDC sizes, now shared by every metric.
 fnt_axis = 18;
 fnt_label = 18;
-fnt_title = 16;
+fnt_title = 14;
 fnt_med = 16;
 
 panelTitles = ...
@@ -142,7 +142,7 @@ else
     metric_title = sprintf('$%s$',metric_tag);
 end
 
-figureTitleSize = 21;
+figureTitleSize = 18;
 annotation(gcf,'textbox',[0.02 0.935 0.96 0.055], ...
     'String',sprintf(['$\\texttt{%s}$: ' ...
     '%s %s performance summary for basin/period scenarios'], ...
@@ -247,9 +247,11 @@ line(axh,xMark,yMark, ...
     'markersize',med_ms, ...
     'handlevisibility','off');
 
+metricSubscript = local_median_metric_subscript(metric_tag);
+scenarioSubscript = lower(strtrim(char(string(scenario_tag))));
 txt = sprintf(['$\\widehat{T}_' ...
-    '{\\mathrm{%s}_{\\rm %s}} = %.3f$'], ...
-    metric_tag,scenario_tag,medX);
+    '{%s,\\mathrm{%s}} = %.3f$'], ...
+    metricSubscript,scenarioSubscript,medX);
 
 text(axh,xt,yMark,txt, ...
     'interpreter','latex', ...
@@ -269,9 +271,31 @@ if strcmpi(part,'sage')
         name = 'SAGE';
     else
         name = char(string( ...
-            mdl.names(mdl.model(1))));
+            string(sage_model_name(mdl.model(1)))));
     end
 else
     name = 'SITE';
+end
+end
+
+function tex = local_median_metric_subscript(metricTag)
+%LOCAL_MEDIAN_METRIC_SUBSCRIPT Lowercase subscripts of the T estimator.
+
+tag = lower(strtrim(char(string(metricTag))));
+switch tag
+    case 'nse'
+        tex = '\mathrm{nse}';
+    case 'kge'
+        tex = '\mathrm{kge}';
+    case 'jkge'
+        tex = '\mathrm{jkge}';
+    case 's_fdc'
+        tex = 'S_{\mathrm{fdc}}';
+    case 's_p'
+        tex = 'S_p';
+    case 's_logp'
+        tex = 'S_{\log p}';
+    otherwise
+        tex = sprintf('\\mathrm{%s}',tag);
 end
 end

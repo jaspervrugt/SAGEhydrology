@@ -41,8 +41,11 @@ end
 fL = sage_ecdf_value_from_points(x,f,xL);
 fR = sage_ecdf_value_from_points(x,f,xR);
 
-% Keep only points within range
-in = (x >= xL) & (x <= xR);
+% The left boundary is represented once, at F(xL). Re-inserting support
+% at xL (especially the artificial zero from sage_ecdf) creates a false
+% downward/upward vertical segment when the lower tail is off the plot.
+% Interior minima retain their zero-to-first-probability segment.
+in = (x > xL) & (x <= xR);
 x_in = x(in);
 f_in = f(in);
 

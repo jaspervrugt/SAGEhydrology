@@ -1,89 +1,36 @@
 function file_mat = export_SAGE(mdl,dat,bas,prd,dirres,Q,prf,region,nTheta)
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%EXPORT_SAGE Export final SAGE training results to a single MAT file
+%EXPORT_SAGE Export final SAGE results to a MAT file.
 %
-% SYNOPSIS: file_mat = export_SAGE(mdl,dat,bas,prd,dirres, ...
-%  Q,prf,region,nTheta)
+%  Combines basin metadata, measured and simulated discharge, parameter
+%  values, and performance histories.
 %
-%   mdl        structure model information
-%    .local     train/eval handling
-%                0 -> global train/eval split
-%                1 -> basin-specific train/eval split
-%    .id_train  training indices of global split
-%    .id_eval   evaluation indices of global split
-%   dat        1xK cell array basin data structures
-%    {k}.y_n    measured discharge series basin k
-%    {k}.id_train
-%               training indices basin k (if mdl.local = 1)
-%    {k}.id_eval
-%               evaluation indices basin k (if mdl.local = 1)
-%    {k}.use    basin usage flag
-%                1 -> training basin
-%                2 -> evaluation basin
-%    {k}.id_USGS
-%               USGS gauge identifier
-%    {k}.gname  basin name
-%   bas        structure basin information
-%    .K_t       number of training basins
-%    .K_e       number of evaluation basins
-%   prd        structure training/evaluation period information
-%    .dt        temporal data resolution
-%                [1=daily, 24=hourly, 96=15-minute]
-%    .ds        first day complete simulation period
-%   dirres     directory for exported MAT file
-%   Q          simulated discharge structure
-%    .tt        training basins | training split
-%    .te        training basins | evaluation split
-%    .et        evaluation basins | training split
-%    .ee        evaluation basins | evaluation split
-%   prf        performance structure; prf.curr contains the final
-%              basin-wise metrics and prf.iter the training histories
-%    .curr      current basin-wise NSE, KGE, S_fdc and JKGE values;
-%               each metric has .tt, .te, .et and .ee scenarios
-%    .iter      scalar performance histories across SAGE iterations
-%   region     Data region: US/GB/BR
-%   nTheta        dxK matrix normalized model parameter values
-%               d = number of model parameters
-%               K = number of basins
+% SYNOPSIS:
+%   file_mat = export_SAGE(mdl,dat,bas,prd,dirres,Q,prf, ...
+%       region,nTheta)
 %
-%   file_mat   OUTPUT: full path exported MAT file
+% INPUT ARGUMENTS:
+%   mdl             model and temporal split settings
+%    .local          global or basin-specific split flag
+%    .id_train       global training indices
+%    .id_eval        global evaluation indices
+%   dat             basin observations, IDs, and local indices
+%   bas             training/evaluation basin counts
+%   prd             time resolution and simulation period
+%   dirres          output directory
+%   Q               simulations for tt, te, et, and ee scenarios
+%   prf             current metrics and iteration histories
+%   region          region identifier
+%   nTheta          trained normalized model parameters
 %
-% The exported structure E contains:
+% OUTPUT ARGUMENTS:
+%   file_mat        full path to the exported MAT file
 %
-%   E.basins
-%    .row_id    basin row identifier
-%    .basin_id  basin identifier
-%    .basin_name
-%                basin name
-%    .basin_group
-%                1 -> training basin
-%                2 -> evaluation basin
-%   E.performance
-%    .current    final basin-wise metric structure copied from prf.curr
-%    .iteration scalar training histories copied from prf.iter
-%    .tt         performance metrics training basin | training split
-%    .te         performance metrics training basin | evaluation split
-%    .et         performance metrics evaluation basin | training split
-%    .ee         performance metrics evaluation basin | evaluation split
-%   E.theta_n    normalized parameter matrix
-%   E.discharge
-%    .split_code
-%                KxN matrix train/eval flags
-%                1 -> training output
-%                2 -> evaluation output
-%                NaN -> not used
-%    .Q_measured
-%                KxN matrix measured discharge
-%    .Q_simulated
-%                KxN matrix simulated discharge
-%    .Q_scenario
-%                original scenario-specific discharge structure Q
-%    .time       Nx1 vector simulation time
-%   E.metadata   metadata and configuration structures
+% NOTES:
+%   Scenario codes tt, te, et, and ee identify training or evaluation basins
+%   crossed with training or evaluation periods.
 %
-% row_id links basins, performance metrics, parameters and discharge matrices
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
 % © Written by Jasper A. Vrugt, Apr. 2026 / updated Aug. 2026             %
 % University of California, Irvine                                        %
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -92,6 +39,8 @@ function file_mat = export_SAGE(mdl,dat,bas,prd,dirres,Q,prf,region,nTheta)
     NSE = curr.NSE;
     KGE = curr.KGE;
     S_fdc = curr.S_fdc;
+    S_p = local_current_metric(curr,'S_p');
+    S_logp = local_current_metric(curr,'S_logp');
     JKGE = curr.JKGE;
 
     if nargin < 9
@@ -156,16 +105,16 @@ function file_mat = export_SAGE(mdl,dat,bas,prd,dirres,Q,prf,region,nTheta)
     E.performance.iteration = prf.iter;
     E.performance.tt = ...
         local_metric_table('tt', ...
-        bas,NSE,KGE,S_fdc,JKGE);
+        bas,NSE,KGE,S_fdc,S_p,S_logp,JKGE);
     E.performance.te = ...
         local_metric_table('te', ...
-        bas,NSE,KGE,S_fdc,JKGE);
+        bas,NSE,KGE,S_fdc,S_p,S_logp,JKGE);
     E.performance.et = ...
         local_metric_table('et', ...
-        bas,NSE,KGE,S_fdc,JKGE);
+        bas,NSE,KGE,S_fdc,S_p,S_logp,JKGE);
     E.performance.ee = ...
         local_metric_table('ee', ...
-        bas,NSE,KGE,S_fdc,JKGE);
+        bas,NSE,KGE,S_fdc,S_p,S_logp,JKGE);
     
     % ------------------------------
     % 3. Final normalized parameters
@@ -372,7 +321,13 @@ function y = local_get_measured(dk)
 % ---------------------------------
 
     y = [];
-    fields = {'y_n','y','Qobs', ...
+    if isstruct(dk) && isfield(dk,'obs') && isstruct(dk.obs) ...
+            && isfield(dk.obs,'Q') && isstruct(dk.obs.Q) ...
+            && isfield(dk.obs.Q,'value') && ~isempty(dk.obs.Q.value)
+        y = double(dk.obs.Q.value(:))';
+        return
+    end
+    fields = {'y','Qobs', ...
         'qobs','Q_meas','Q_measured'};
     for i = 1:numel(fields)
         f = fields{i};
@@ -504,7 +459,7 @@ function id = local_logical_or_index(id,N)
 end
 
 % ----------------------------------------------------
-function T = local_metric_table(scen,bas,NSE,KGE,S_fdc,JKGE)
+function T = local_metric_table(scen,bas,NSE,KGE,S_fdc,S_p,S_logp,JKGE)
 % ----------------------------------------------------
 
     idx = local_scenario_rows(scen,bas);
@@ -514,6 +469,8 @@ function T = local_metric_table(scen,bas,NSE,KGE,S_fdc,JKGE)
     nse = local_metric_values(NSE,scen,n);
     kge = local_metric_values(KGE,scen,n);
     s_fdc = local_metric_values(S_fdc,scen,n);
+    s_p = local_metric_values(S_p,scen,n);
+    s_logp = local_metric_values(S_logp,scen,n);
     jkge = local_metric_values(JKGE,scen,n);
     kge_r = local_component_values(KGE,scen,'r',n);
     kge_alpha = local_component_values(KGE,scen,'alpha',n);
@@ -522,11 +479,23 @@ function T = local_metric_table(scen,bas,NSE,KGE,S_fdc,JKGE)
     jkge_V = local_component_values(JKGE,scen,'V',n);
     jkge_C = local_component_values(JKGE,scen,'C',n);
     
-    T = table(row_id,nse,kge,kge_r,kge_alpha,kge_beta,s_fdc, ...
+    T = table(row_id,nse,kge,kge_r,kge_alpha,kge_beta, ...
+        s_fdc,s_p,s_logp, ...
         jkge,jkge_M,jkge_V,jkge_C, ...
         'VariableNames',{'row_id', ...
-        'NSE','KGE','KGE_r','KGE_alpha','KGE_beta','S_fdc', ...
+        'NSE','KGE','KGE_r','KGE_alpha','KGE_beta', ...
+        'S_fdc','S_p','S_logp', ...
         'JKGE','JKGE_M','JKGE_V','JKGE_C'});
+end
+
+function M = local_current_metric(curr,name)
+%LOCAL_CURRENT_METRIC Backward-compatible access to a basin-wise metric.
+
+    if isstruct(curr) && isfield(curr,name)
+        M = curr.(name);
+    else
+        M = struct('tt',[],'te',[],'et',[],'ee',[]);
+    end
 end
 
 % -----------------------------------------------------------
@@ -702,7 +671,7 @@ function q = local_extract_scenario_series(X,ii,k)
     
     elseif isnumeric(X)
     
-        % Most pproc_SAGE output is time x basin:
+        % Most postproc_SAGE output is time x basin:
         % Q.tt = nTrainTime x K_t
         % Q.te = nEvalTime  x K_t
         % Q.et = nTrainTime x K_e

@@ -1,0 +1,16 @@
+region,resolution,gauge_id,variable,action,date,factor,reason,evidence,enabled
+CAMELS_IS,Daily,97,basin,exclude,,,documented gauge-basin mapping inconsistency,manual data review,true
+CAMELS_IL,Daily,30131,basin,exclude,,,non-closed karst/groundwater basin; mapped surface area does not represent the effective contributing area,manual hydrologic review,true
+CAMELS_NZ,Daily,19779,Q,scale,,0.001,source discharge is expressed in L/s rather than m3/s,3.98 km2 basin and runoff-ratio/unit consistency check,true
+HYDRO_CIS,Daily,2155,Q,scale,,0.001,source discharge values are consistent with L/s rather than m3/s,uncorrected mean Q = 1801 mm/day and maximum Q = 21600 mm/day,true
+HYDRO_CIS,Daily,2192,Q,scale,,0.001,source discharge values are consistent with L/s rather than m3/s,uncorrected mean Q = 2018 mm/day and maximum Q = 24118 mm/day,true
+HYDRO_CIS,Daily,2202,Q,scale,,0.001,source discharge values are consistent with L/s rather than m3/s,uncorrected mean Q = 939 mm/day and maximum Q = 20787 mm/day,true
+HYDRO_CIS,Daily,72191,Q,scale,,0.001,source discharge values are consistent with L/s rather than m3/s,uncorrected mean Q = 2602 mm/day and maximum Q = 8985 mm/day,true
+EStreams_PT,Daily,PT000190,basin,exclude,,,physically inconsistent discharge record; basin-wide scaling is not defensible,"paired runoff ratio = 48.6; median runoff = 88.0 mm/day; discontinuous regimes; EStreams gauge quality class E",true
+EStreams_PT,Daily,PT000060,basin,exclude,,,sustained physically implausible runoff depths; point masking is not defensible,"17 days above 100 mm/day and 48 days above 50 mm/day; peak = 213.5 mm/day; official and EStreams basin areas agree",true
+EStreams_PT,Daily,PT000071,Q,mask,2019-03-08,,isolated implausible discharge spike after missing observations,"13105.75 m3/s; next day 660.25 m3/s; same-day precipitation 0 mm",true
+EStreams_PT,Daily,PT000211,Q,mask,2019-10-01,,physically impossible discharge spike after missing observations,"59732.38 m3/s in a 404.455 km2 basin; next day 28.25 m3/s",true
+EStreams_PT,Daily,PT000030,Q,mask,2006-10-01,,isolated implausible discharge spike after a multi-year gap,"599.42 m3/s; next day 0.43 m3/s; same-day precipitation 0 mm",true
+EStreams_PT,Daily,PT000191,Q,mask,2015-10-01,,isolated implausible discharge spike after missing observations,"628.78 m3/s; next day 4.73 m3/s; same-day precipitation 0 mm",true
+EStreams_PT,Daily,PT000222,Q,mask,1996-07-01,,isolated implausible discharge spike after a multi-year gap,"397.22 m3/s; next day 0.47 m3/s; same-day precipitation 0 mm",true
+EStreams_PT,Daily,PT000222,Q,mask,2015-03-01,,isolated implausible discharge spike after a multi-year gap,"645.73 m3/s; next day 0.36 m3/s; same-day precipitation 0 mm",true

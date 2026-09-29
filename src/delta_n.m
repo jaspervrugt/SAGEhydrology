@@ -1,21 +1,28 @@
 function delta = delta_n(loss_fnc,y_n,q_n,varargin)
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%DELTA_N Loss-sensitivity vector of loss functions
+%DELTA_N Compute loss sensitivity to simulated discharge.
 %
-% SYNOPSIS: delta = delta_n(loss_fnc,y_n,q_n,varargin)
-%   loss_fnc    scalar loss-function identifier
-%                1 = sum of absolute residuals
-%                2 = generalized least squares
-%                3 = Nash-Sutcliffe efficiency
-%                4 = Kling-Gupta efficiency
-%                5 = Huber loss
-%                6 = flow-duration-curve loss
-%                7 = Jawad-Kling-Gupta efficiency
-%   y_n         nx1 measured discharge vector
-%   q_n         nx1 simulated discharge vector
-%   varargin    OPTIONAL: 
-%                Sigma_eps: nxn measurement-error covariance matrix [fnc=2]
-%   delta       OUTPUT: nx1 loss-sensitivity vector dL/dq_n
+%  Return the derivative or subgradient of a selected discharge loss with
+%  respect to each simulated value.
+%
+% SYNOPSIS:
+%   delta = delta_n(loss_fnc,y_n,q_n,varargin)
+%
+% INPUT ARGUMENTS:
+%   loss_fnc        loss code: 1 SAR; 2 GLS; 3 NSE; 4 KGE; 6 FDC
+%   y_n             measured-discharge vector
+%   q_n             simulated-discharge vector
+%   varargin        loss-specific additional argument
+%    {1}             measurement-error covariance for GLS (loss 2)
+%    {1}             FDC formulation 1, 2, or 3 for loss 6
+%
+% OUTPUT ARGUMENTS:
+%   delta           sensitivity vector d(loss)/d(q_n)
+%
+% NOTES:
+%   FDC formulations 1-3 use physical discharge, probability, and
+%   log-probability, respectively; omitted formulation defaults to 1.
+%   Huber (5) and JKGE (7) use dedicated gradient routines.
 %
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % © Written by Jasper A. Vrugt, Dec. 2025 / updated Apr. 2026             %
@@ -65,7 +72,7 @@ function delta = delta_n(loss_fnc,y_n,q_n,varargin)
                 'Use huber_loss function ' ...
                 'instead']);
         
-        case 6 % Flow duration curve loss
+        case 6 % Flow-duration-curve divergence
             % O(n log n) derivative of the energy-distance/FDC objective.
             %
             % For each simulated discharge q_i,
@@ -98,7 +105,38 @@ function delta = delta_n(loss_fnc,y_n,q_n,varargin)
             end
     
             ys = sort(y);
-            [qs,ord] = sort(q);    
+            [qs,ord] = sort(q);
+            if isempty(varargin)
+                formulation = 1;
+            else
+                formulation = local_fdc_formulation(varargin{1});
+            end
+
+            % Probability-space formulations pair equal-probability
+            % order statistics. Mapping through ord returns dL/dq_n in
+            % the original time order. At exact ties this is a valid
+            % stable-sort subgradient.
+            if formulation == 2
+                delta = zeros(n,1);
+                delta(ord) = (2/n)*(qs - ys);
+                return
+            elseif formulation == 3
+                yp = ys(ys > 0);
+                if isempty(yp)
+                    delta = nan(n,1);
+                    return
+                end
+                q0 = 0.01*median(yp);
+                if any(qs + q0 <= 0)
+                    delta = nan(n,1);
+                    return
+                end
+                delta = zeros(n,1);
+                delta(ord) = (2/n)*( ...
+                    log(qs + q0) - log(ys + q0))./(qs + q0);
+                return
+            end
+
             % -------------------------------------
             % First sign sum: sum_j sign(q_i - y_j)
             % -------------------------------------
@@ -172,4 +210,28 @@ function delta = delta_n(loss_fnc,y_n,q_n,varargin)
                 'index: %d.'],loss_fnc);
     end
 
+end
+
+function formulation = local_fdc_formulation(value)
+%LOCAL_FDC_FORMULATION Normalize the public 6a/6b/6c selection.
+
+    if isnumeric(value) && isscalar(value) && isfinite(value)
+        formulation = double(value);
+    else
+        key = lower(regexprep(char(string(value)),'[^a-z0-9]',''));
+        switch key
+            case {'1','a','fdc','dfdc','physical','physicalcdf'}
+                formulation = 1;
+            case {'2','b','p','dp','quantile'}
+                formulation = 2;
+            case {'3','c','logp','dlogp','logquantile'}
+                formulation = 3;
+            otherwise
+                formulation = NaN;
+        end
+    end
+    if ~ismember(formulation,1:3)
+        error('delta_n:BadFDCFormulation', ...
+            'FDC formulation must be 1 (d_fdc), 2 (d_p), or 3 (d_logp).');
+    end
 end

@@ -59,6 +59,10 @@ struct OutputView {
     std::size_t zcols = 0;
     std::size_t nq = 0;
     std::size_t nj = 0;
+    double* swe = nullptr;
+    double* Jswe = nullptr;
+    double* sm = nullptr;
+    double* Jsm = nullptr;
 };
 
 struct Result {

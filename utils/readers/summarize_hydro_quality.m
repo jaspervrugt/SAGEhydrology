@@ -9,7 +9,7 @@ function quality = summarize_hydro_quality(dat,bas,split)
 %   quality   compact structure used by the SAGE data-quality dashboard
 %
 % DESCRIPTION:
-%   Coverage is calculated directly from the canonical P, Ep, T, and y_n
+%   Coverage is calculated directly from canonical P, Ep, T, and obs.Q
 %   vectors produced by the generic readers. Existing bad fields are
 %   reported separately as consistency information. No source data are
 %   changed and no complete time series are retained in the summary.
@@ -66,14 +66,15 @@ function quality = summarize_hydro_quality(dat,bas,split)
             end
         end
 
-        Q = local_vector(entry,'y_n');
+        Q = local_observation_vector(entry,'Q');
         nQ(k) = numel(Q);
         qInvalid = ~isfinite(Q) | Q < 0;
         nQBad(k) = sum(qInvalid);
         longestQGap(k) = local_longest_run(qInvalid);
-        if isstruct(entry) ...
-                && isfield(entry,'bad')
-            nReaderQBad(k) = local_bad_count(entry.bad,nQ(k));
+        if isstruct(entry) && isfield(entry,'obs') ...
+                && isstruct(entry.obs) && isfield(entry.obs,'Q') ...
+                && isstruct(entry.obs.Q) && isfield(entry.obs.Q,'bad')
+            nReaderQBad(k) = local_bad_count(entry.obs.Q.bad,nQ(k));
         end
 
         if exist('P','var')
@@ -134,6 +135,16 @@ function quality = summarize_hydro_quality(dat,bas,split)
         & quality.coverage_q < 30;
     quality.created = datetime('now');
 
+end
+
+function value = local_observation_vector(entry,name)
+    value = [];
+    if isstruct(entry) && isfield(entry,'obs') ...
+            && isstruct(entry.obs) && isfield(entry.obs,name) ...
+            && isstruct(entry.obs.(name)) ...
+            && isfield(entry.obs.(name),'value')
+        value = entry.obs.(name).value;
+    end
 end
 
 function ratio = local_annual_runoff_ratios(P,Q,pair,split)

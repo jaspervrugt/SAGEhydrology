@@ -6,7 +6,7 @@ function mexFile = compile_information(force)
 %
 % Source MATLAB only. Deployed SAGE never compiles C++ code.
 %
-% This helper tries to compile information_bottleneck_SAGE_mex with OpenMP
+% This helper tries to compile sage_information_bottleneck_mex with OpenMP
 % first. If OpenMP flags are unsupported on the current platform/compiler,
 % it falls back automatically to a serial build.
 %
@@ -38,9 +38,9 @@ function mexFile = compile_information(force)
 
     here = fileparts(mfilename('fullpath'));
     sourceFile = fullfile(here, ...
-        'information_bottleneck_SAGE_mex.cpp');
+        'sage_information_bottleneck_mex.cpp');
     mexFile = fullfile(here, ...
-        ['information_bottleneck_SAGE_mex.' mexext]);
+        ['sage_information_bottleneck_mex.' mexext]);
 
     assert(isfile(sourceFile), ...
         'SAGE:Information:MissingSource', ...
@@ -65,7 +65,7 @@ function mexFile = compile_information(force)
              '    mex -setup C++\n\nand retry.']);
     end
 
-    clear information_bottleneck_SAGE_mex
+    clear sage_information_bottleneck_mex
     fprintf('\nCompiling SAGE Information MEX\n');
     fprintf('  Platform : %s\n',computer);
     fprintf('  MEX ext  : .%s\n',mexext);
@@ -125,7 +125,7 @@ function mexFile = compile_information(force)
         catch ME2
             error('SAGE:Information:CompileFailed', ...
                 ['Could not compile ' ...
-                'information_bottleneck_SAGE_mex:\n%s'], ...
+                'sage_information_bottleneck_mex:\n%s'], ...
                 ME2.message);
         end
     end

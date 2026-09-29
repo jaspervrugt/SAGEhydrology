@@ -1,6 +1,6 @@
 function R=region_config_IE()
 %REGION_CONFIG_IE Defaults for Ireland GRDC-Caravan.
-    R=region_config_GRDC('IE','Ireland',43,42,35,7, ...
+    R=region_config_GRDC('IE','Ireland',43,43,36,7, ...
         '01/10/1980','30/09/2000','01/10/2000','30/09/2020');
 
     % Declarative generic-reader schemas owned by this region module.

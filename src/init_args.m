@@ -1,36 +1,33 @@
 function [prf,ax,tTheta,At,An,nTheta] = init_args(bas,mdl,alg,attr)
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%INIT_ARGS Initializes plotting handles, performance structures, and
-% attribution arrays for SAGE training and postprocessing.
+%INIT_ARGS Initialize SAGE diagnostics and result arrays.
+%
+%  Allocates performance histories, parameter traces, and optional
+%  attribution arrays.
 %
 % SYNOPSIS:
-%  [prf,ax,tTheta,At,An,nTheta] = init_args(bas,mdl,alg,attr)
+%   [prf,ax,tTheta,At,An,nTheta] = init_args(bas,mdl,alg,attr)
 %
-%   bas         structure with basin information
-%    .K_t        number of training watersheds
-%    .K_e        number of evaluation watersheds
-%    .K          total number of watersheds
-%   mdl         structure with model settings
-%    .mode       assessment design
-%                 1 = training basins only | training period only
-%                 2 = training basins only | training & evaluation prd/mask
-%                 3 = training and evaluation basins | training period only
-%                 4 = training and evaluation basins | training and
-%                     evaluation period/mask
-%   alg         optimization settings
-%    .i_max      maximum number of descent iterations
-%   attr        scalar attribution switch: 1 enables attribution arrays
+% INPUT ARGUMENTS:
+%   bas             selected basin counts
+%    .K_t            number of training basins
+%    .K_e            number of evaluation basins
+%    .K              total number of basins
+%   mdl             assessment settings
+%    .mode           basin/period assessment design (1 to 4)
+%   alg             optimization settings
+%    .i_max          maximum number of training iterations
+%   attr            scalar switch for attribution arrays
 %
-% OUTPUT:
-%   prf         performance structure with:
-%                .curr basin-wise metrics for the current iteration
-%                .iter scalar histories stored across iterations, including
-%                      the learning rate used to create each evaluated phi
-%   ax          structure with graphics handles
-%   tTheta      i_max x d x 7 normalized-parameter percentile traces
-%   At          d x K_t x i_max array attribution values, training basins
-%   An          d x K_t x i_max array net attribution values, training basins
-%   nTheta      empty normalized-parameter array, []
+% OUTPUT ARGUMENTS:
+%   prf             current metrics and iteration histories
+%    .curr           basin-wise metrics for the current iteration
+%    .iter           scalar histories across iterations
+%   ax              graphics-handle structure
+%   tTheta          normalized-parameter percentile traces
+%   At              training-basin attribution array
+%   An              training-basin net attribution array
+%   nTheta          empty normalized-parameter array
 %
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % © Written by Jasper A. Vrugt, Dec. 2025                                 %
@@ -99,9 +96,10 @@ function [prf,ax,tTheta,At,An,nTheta] = init_args(bas,mdl,alg,attr)
     prf.iter = struct();
     
     stats = {'L','SAR','GLS', ...
-        'RSS','Huber','NSE','KGE','JKGE','S_fdc', ...
-        'mNSE','mKGE','mJKGE','mS_fdc', ...
-        'Sib_NSE','Sib_KGE','Sib_S_fdc', ...
+        'RSS','Huber','NSE','KGE','JKGE','S_fdc','S_p','S_logp', ...
+        'mNSE','mKGE','mJKGE','mS_fdc','mS_p','mS_logp', ...
+        'Sib_NSE','Sib_KGE','Sib_JKGE','Sib_S_fdc', ...
+        'Sib_S_p','Sib_S_logp', ...
         'KGE_r','mKGE_r', ...
         'KGE_alpha','mKGE_alpha', ...
         'KGE_beta','mKGE_beta', ...
@@ -118,7 +116,7 @@ function [prf,ax,tTheta,At,An,nTheta] = init_args(bas,mdl,alg,attr)
     
     prf.iter.cpuT = nan(1,i_max);
     % Learning rate used to create the phi evaluated at iteration i.
-    % Entry 1 remains NaN because phi_1 is created by descent('init').
+    % Entry 1 remains NaN because phi_1 is created by ffn_theta('init').
     % For i > 1, assign prf.iter.lr(i) = opts.lr_current after descent('dyn').
     prf.iter.lr = nan(1,i_max);
     prf.iter.gradNormPre = nan(1,i_max);

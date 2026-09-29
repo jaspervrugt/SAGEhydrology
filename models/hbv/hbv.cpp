@@ -212,18 +212,25 @@ bool run_into(int ns,
     }
 
     if (!mem && n_q > 0) {
-        if (!out.q || out.nq != static_cast<std::size_t>(n_q)) {
+        if ((!out.q && !out.J && !out.swe && !out.Jswe
+             && !out.sm && !out.Jsm)
+            || out.nq != static_cast<std::size_t>(n_q)) {
             return true;
         }
-        if (needJ && (!out.J || out.nj != static_cast<std::size_t>(d))) {
+        if (needJ && ((!out.J && !out.Jswe && !out.Jsm)
+                      || out.nj != static_cast<std::size_t>(d))) {
             return true;
         }
     }
 
     std::fill(out.Z, out.Z + out.zrows * out.zcols, 0.0);
     if (!mem && n_q > 0) {
-        std::fill(out.q, out.q + out.nq, 0.0);
-        if (needJ) {
+        if (out.q) std::fill(out.q, out.q + out.nq, 0.0);
+        if (out.swe) std::fill(out.swe, out.swe + out.nq, 0.0);
+        if (out.Jswe) std::fill(out.Jswe, out.Jswe + out.nq*out.nj, 0.0);
+        if (out.sm) std::fill(out.sm, out.sm + out.nq, 0.0);
+        if (out.Jsm) std::fill(out.Jsm, out.Jsm + out.nq*out.nj, 0.0);
+        if (needJ && out.J) {
             std::fill(out.J, out.J + out.nq * out.nj, 0.0);
         }
     }
@@ -369,15 +376,27 @@ bool run_into(int ns,
                 out.Z[static_cast<std::size_t>(j)] = zcur[j];
             }
 
-            if (s >= ipr && k_out < n_q) {
-                out.q[static_cast<std::size_t>(k_out)] = zcur[m - 1] - prev[m - 1];
+            if (s >= ipr && k_out < n_q
+                    && (out.q || out.J || out.swe || out.Jswe
+                        || out.sm || out.Jsm)) {
+                if (out.q)
+                    out.q[static_cast<std::size_t>(k_out)] =
+                        zcur[m - 1] - prev[m - 1];
+                if (out.swe) out.swe[k_out] = zcur[0];
+                if (out.sm) out.sm[k_out] = zcur[1];
 
-                if (needJ) {
+                if (needJ && out.J) {
                     for (int j = 0; j < d; ++j) {
                         const int idx = (j + 2) * m - 1;
                         out.J[static_cast<std::size_t>(k_out) +
                               static_cast<std::size_t>(n_q) * j] = zcur[idx] - prev[idx];
                     }
+                }
+                for (int j=0;j<d;++j) {
+                    if (out.Jswe) out.Jswe[k_out+(std::size_t)n_q*j]=
+                        zcur[(j+1)*m];
+                    if (out.Jsm) out.Jsm[k_out+(std::size_t)n_q*j]=
+                        zcur[(j+1)*m+1];
                 }
                 ++k_out;
             }

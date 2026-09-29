@@ -1,48 +1,32 @@
 function varargout = ffn_theta(stage,x1,x2,x3,x4)
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%FFN_THETA  MLP mapping catchment attributes -> normalized parameters (0,1)
-% using a feedforward neural network
-% 
+%FFN_THETA Map basin attributes to normalized parameters.
+%
+%  Initializes, evaluates, and differentiates the feedforward network.
+%
 % SYNOPSIS:
-%   nTheta = ffn_theta('eval',phi,A)
-%   [nTheta,H] = ffn_theta('eval_info',phi,A)
-%   dLdphi = ffn_theta('grad',phi,A,alg,G)
+%   [phi,net] = ffn_theta('init',net)
+%   [nTheta,cache] = ffn_theta('eval',phi,A)
+%   [nTheta,H,cache] = ffn_theta('info',phi,A)
+%   dLdphi = ffn_theta('back',phi,cache,alg,G)
 %
-%   stage   task that should be completed
-%    'eval' to evaluate network and return normalized parameter values
-%       x1: phi = struct with fields:
-%           phi.W{1:L} = weight matrices
-%           phi.b{1:L} = bias vectors
-%           phi.layers = layer sizes
-%           phi.tf{1:nH} = transfer function(s) hidden layers
-%       x2: A = r x K matrix of catchment attributes
-%    'grad' to compute gradient of network
-%       x1: phi = struct with fields:
-%           phi.W{1:L} = weight matrices
-%           phi.b{1:L} = bias vectors
-%           phi.layers = layer sizes
-%           phi.tf{1:nH} = transfer function(s) hidden layers
-%       x2: A = r x K matrix of catchment attributes
-%       x3: alg = optimizer settings; alg.clipn controls gradient clipping
-%       x4: G = d x K matrix of gradients of hydrologic model
-%    'eval_info' to evaluate network and also return hidden-layer
-%       activations for information-bottleneck diagnostics
-%       x1: phi = canonical network structure
-%       x2: A = r x K matrix of catchment attributes
+% INPUT ARGUMENTS:
+%   stage           'init', 'eval', 'info', or 'back'
+%   x1              stage-specific net or canonical phi structure
+%   x2              attributes A, or forward cache for 'back'
+%   x3              optimizer settings alg for 'back'
+%   x4              model-parameter gradient G for 'back'
 %
-% OUTPUT ARGUMENTS
-%    'eval': nTheta = d x K matrix of normalized parameter values
-%    'grad': dLdphi = structure with mean gradients w.r.t. all W and b
-%    'eval_info':
-%       nTheta = d x K matrix of normalized parameter values
-%       H      = 1 x nH cell array; H{ell} is K x h_ell and contains
-%                post-activation hidden-layer values for all basins
+% OUTPUT ARGUMENTS:
+%   varargout       stage-specific network results
+%    'init'          initialized phi and network settings
+%    'eval'          normalized parameters and forward cache
+%    'info'          parameters, hidden activations, and cache
+%    'back'          gradient with respect to phi
 %
-% NOTES
-%   1. Output layer uses sigmoid to enforce unit-cube parameterization.
-%   2. Supports one to five hidden layers.
-%   3. Network-variable initialization is owned by descent('init').
-%   4. ffn_theta only turns phi -> nTheta and backpropagates G -> dLdphi.
+% NOTES:
+%   The sigmoid output layer maps hydrologic parameters to (0,1).
+%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % © Written by Jasper A. Vrugt, Dec. 2025                                 %
 % University of California Irvine                                         %
@@ -57,109 +41,117 @@ function varargout = ffn_theta(stage,x1,x2,x3,x4)
     end
     
     switch lower(stage)
+
+        case 'init'
+            if nargin < 2
+                error(['      Error: ffn_theta(''init''): ' ...
+                    'requires the network specification net.']);
+            end
+            [phi,net] = local_initialize_phi(x1);
+            varargout = {phi,net};
+
         case 'eval'
             if nargin < 3
                 error(['      Error: ffn_theta(''eval''): ' ...
                     'requires inputs phi and A.']);
             end
-    
             phi = local_validate_phi_struct(x1);
             A = x2;
-    
-            nTheta = forward_struct(phi,A);
-            varargout = {nTheta};
-
-        case 'grad'
-            if nargin < 5
-                error(['      Error: ffn_theta(''grad''): ' ...
-                    'requires inputs phi, A, alg, and G.']);
+            if nargout > 1
+                [nTheta,cache] = forward_cache(phi,A);
+                varargout = {nTheta,cache};
+            else
+                nTheta = forward_struct(phi,A);
+                varargout = {nTheta};
             end
-    
+
+        case 'back'
+
+            if nargin < 5
+                error(['      Error: ffn_theta(''back''): ' ...
+                    'requires inputs phi, cache, alg, and G.']);
+            end
             phi = local_validate_phi_struct(x1);
             clipn = 0;
-            if isstruct(x3) && isfield(x3,'clipn') ...
+            if isstruct(x3) ...
+                    && isfield(x3,'clipn') ...
                     && ~isempty(x3.clipn)
                 clipn = x3.clipn;
             end
-            A = x2;
-            G = x4;
-    
-            if ~isnumeric(A) ...
-                    || ~ismatrix(A)
-                error(['      Error: ffn_theta(''grad''): ' ...
-                    'A must be a numeric matrix.']);
+            cache = x2;
+            G = x4;    
+            if ~isstruct(cache) ...
+                    || ~isfield(cache,'A') ...
+                    || ~isfield(cache,'Z') ...
+                    || ~isfield(cache,'Y')
+                error(['      Error: ffn_theta(''back''): ' ...
+                    'cache must be returned by ffn_theta(''eval'') ' ...
+                    'or ffn_theta(''info'').']);
             end
             if ~isnumeric(G) ...
                     || ~ismatrix(G)
-                error(['      Error: ffn_theta(''grad''): ' ...
+                error(['      Error: ffn_theta(''back''): ' ...
                     'G must be a numeric matrix.']);
             end
-    
-            % Remove basins with invalid attributes or invalid hydrologic gradients.
-            % These basins have no valid training contribution and should not enter
-            % the ANN-gradient average.
-            good = all(isfinite(A),1) ...
-                & all(isfinite(G),1);
-
-            if ~all(good)
-                A = A(:,good);
-                G = G(:,good);
+            nL = numel(phi.W);
+            if ~iscell(cache.A) || ~iscell(cache.Z) ...
+                    || numel(cache.A) ~= nL || numel(cache.Z) ~= nL
+                error(['      Error: ffn_theta(''back''): ' ...
+                    'cache is incompatible with phi.']);
             end
-
-            % How many watersheds for training
-            K_t = size(A,2);
-
+            K_t = size(G,2);
+            if size(cache.Y,1) ~= phi.layers(end) ...
+                    || size(cache.Y,2) < K_t
+                error(['      Error: ffn_theta(''back''): ' ...
+                    'cache does not contain the requested training basins.']);
+            end
+            if size(G,1) ~= phi.layers(end)
+                error(['      Error: ffn_theta(''back''): ' ...
+                    'size(G,1) = %d, but expected %d.'], ...
+                    size(G,1),phi.layers(end));
+            end
+            good = all(isfinite(G),1) ...
+                & all(isfinite(cache.Y(:,1:K_t)),1);
+            for li = 1:nL
+                if size(cache.A{li},2) < K_t ...
+                        || size(cache.Z{li},2) < K_t
+                    error(['      Error: ffn_theta(''back''): ' ...
+                        'cache layer %d has too few basin columns.'],li);
+                end
+                good = good ...
+                    & all(isfinite(cache.A{li}(:,1:K_t)),1) ...
+                    & all(isfinite(cache.Z{li}(:,1:K_t)),1);
+            end
+            K_t = nnz(good);
             if K_t == 0
                 dLdphi = local_zero_like_phi(phi);
                 gradInfo = struct('normPre',0, ...
                     'normPost',0,'clipped',false);
                 varargout = {dLdphi,gradInfo};
                 return
-            end
-    
-            if size(A,1) ~= phi.layers(1)
-                error(['      Error: ffn_theta(''grad''): ' ...
-                    'size(A,1) = %d, but ' ...
-                    'expected %d from phi.layers(1).'], ...
-                    size(A,1),phi.layers(1));
-            end
-            if size(G,1) ~= phi.layers(end)
-                error(['      Error: ffn_theta(''grad''): ' ...
-                    'size(G,1) = %d, but ' ...
-                    'expected %d from phi.layers(end).'], ...
-                    size(G,1),phi.layers(end));
-            end
-            if size(G,2) ~= K_t
-                error(['      Error: ffn_theta(''grad''): ' ...
-                    'size(G,2) must match ' ...
-                    'size(A,2).']);
-            end
-    
-            % forward pass cache
-            [Y,cache] = forward_cache(phi,A);
-    
+            end    
             % backward pass
-            nL = numel(phi.W);
-            nH = numel(phi.tf);
-    
+            nH = numel(phi.tf);    
             dLdphi.W = cell(1,nL);
-            dLdphi.b = cell(1,nL);
-    
+            dLdphi.b = cell(1,nL);    
             % output layer: sigmoid
+            Y = cache.Y(:,1:size(G,2));
+            Y = Y(:,good);
+            G = G(:,good);
             dsg = Y .* (1 - Y);             % d x K_t
             dZ = G .* dsg;                  % d x K_t
     
             for li = nL:-1:1
-                Aprev = cache.A{li};        % input to layer li
+                Aprev = cache.A{li}(:,1:size(good,2));
+                Aprev = Aprev(:,good);      % input to layer li
                 dLdphi.W{li} = dZ * Aprev.';
-                dLdphi.b{li} = sum(dZ,2);
-    
+                dLdphi.b{li} = sum(dZ,2);    
                 if li > 1
-                    dAprev = phi.W{li}.' * dZ;
-    
+                    dAprev = phi.W{li}.' * dZ;    
                     % apply derivative only if previous layer is hidden
                     if (li-1) <= nH
-                        Zprev = cache.Z{li-1};
+                        Zprev = cache.Z{li-1}(:,1:size(good,2));
+                        Zprev = Zprev(:,good);
                         tfi = phi.tf{li-1};
                         dAct = activate_deriv(Zprev,tfi);
                         dZ = dAprev .* dAct;
@@ -170,43 +162,191 @@ function varargout = ffn_theta(stage,x1,x2,x3,x4)
             end
     
             % average over training watersheds
-            dLdphi = struct_divide(dLdphi,K_t);
-    
+            dLdphi = struct_divide(dLdphi,K_t);    
             % sanitize NaN/Inf entries and optionally clip global norm
             [dLdphi,flag,gradInfo] = ...
-                local_postprocess_grad(dLdphi,clipn); %#ok
-    
+                local_postprocess_grad(dLdphi,clipn); %#ok    
             varargout = {dLdphi,gradInfo};
     
-        case 'eval_info'            
+        case 'info'            
             if nargin < 3
-                error(['      Error: ffn_theta(''eval_info''): ' ...
+                error(['      Error: ffn_theta(''info''): ' ...
                     'requires inputs phi and A.']);
             end
-
             phi = local_validate_phi_struct(x1);
             A = x2;
-
             if ~isnumeric(A) ...
                     || ~ismatrix(A)
-                error(['      Error: ffn_theta(''eval_info''): ' ...
+                error(['      Error: ffn_theta(''info''): ' ...
                     'A must be a numeric matrix.']);
             end
             if size(A,1) ~= phi.layers(1)
-                error(['      Error: ffn_theta(''eval_info''): ' ...
+                error(['      Error: ffn_theta(''info''): ' ...
                     'size(A,1) = %d, but expected ' ...
                     '%d from phi.layers(1).'], ...
                     size(A,1),phi.layers(1));
             end
-
-            [nTheta,H] = forward_info(phi,A);
-            varargout = {nTheta,H};
+            [nTheta,H,cache] = forward_info(phi,A);
+            varargout = {nTheta,H,cache};
 
         otherwise
             error(['      Error: ffn_theta: unknown stage "%s". ' ...
-                'Use ''eval'' or ''grad''.'],stage);
+                'Use ''init'', ''eval'', ''info'', or ''back''.'],stage);
     end
 
+end
+
+function [phi,net] = local_initialize_phi(net)
+%LOCAL_INITIALIZE_PHI Initialize FFN weights and biases.
+
+    if ~isstruct(net)
+        error(['      Error: ffn_theta(''init''): ' ...
+            'net must be a structure.']);
+    end
+
+    if ~isfield(net,'h') ...
+            && isfield(net,'ann') ...
+            && isstruct(net.ann) ...
+            && isfield(net.ann,'h')
+        net.h = net.ann.h;
+    end
+    if ~isfield(net,'tf') ...
+            && isfield(net,'ann') ...
+            && isstruct(net.ann) ...
+            && isfield(net.ann,'tf')
+        net.tf = net.ann.tf;
+    end
+
+    req = {'r','d','h','tf'};
+    for k = 1:numel(req)
+        if ~isfield(net,req{k}) ...
+                || isempty(net.(req{k}))
+            error(['      Error: ffn_theta(''init''): ' ...
+                'net.%s is missing or empty.'],req{k});
+        end
+    end
+
+    r = local_positive_integer(net.r,'net.r');
+    d = local_positive_integer(net.d,'net.d');
+    h = local_parse_hidden_widths(net.h);
+
+    if numel(h) > 5
+        error(['      Error: ffn_theta(''init''): ' ...
+            'at most five hidden layers are supported.']);
+    end
+
+    tf = local_parse_transfer_functions(net.tf,numel(h));
+    layers = [r,h,d];
+    nL = numel(layers)-1;
+    nH = numel(h);
+
+    if isfield(net,'seed') && ~isempty(net.seed)
+        seed = net.seed;
+    else
+        seed = 0;
+    end
+    if ~isnumeric(seed) ...
+            || ~isscalar(seed) ...
+            || ~isfinite(seed) ...
+            || seed < 0 ...
+            || mod(seed,1) ~= 0
+        error(['      Error: ffn_theta(''init''): ' ...
+            'net.seed must be a nonnegative integer scalar.']);
+    end
+
+    fprintf('... Initializing FFN weights and biases');
+    rng(double(seed),'twister');
+
+    phi = struct();
+    phi.W = cell(1,nL);
+    phi.b = cell(1,nL);
+    phi.layers = layers;
+    phi.tf = tf;
+
+    for li = 1:nL
+        ni = layers(li);
+        no = layers(li+1);
+        lim = sqrt(6/(ni+no));
+        W = (2*rand(no,ni)-1)*lim;
+
+        if li <= nH && strcmpi(tf{li},'relu')
+            W = randn(no,ni)*sqrt(2/ni);
+        end
+
+        phi.W{li} = W;
+        phi.b{li} = zeros(no,1);
+    end
+
+    net.r = r;
+    net.d = d;
+    net.h = h;
+    net.tf = tf;
+    net.seed = double(seed);
+    net.l = sum(layers(1:end-1).*layers(2:end) + layers(2:end));
+
+    fprintf(' ... Done\n');
+end
+
+function value = local_positive_integer(value,name)
+%LOCAL_POSITIVE_INTEGER Validate and return a positive integer scalar.
+
+    if ~isnumeric(value) ...
+            || ~isscalar(value) ...
+            || ~isfinite(value) ...
+            || value < 1 ...
+            || mod(value,1) ~= 0
+        error(['      Error: ffn_theta(''init''): ' ...
+            '%s must be a positive integer.'],name);
+    end
+    value = double(value);
+end
+
+function h = local_parse_hidden_widths(hin)
+%LOCAL_PARSE_HIDDEN_WIDTHS Convert hidden widths to a numeric row vector.
+
+    while iscell(hin) && isscalar(hin)
+        hin = hin{1};
+    end
+
+    if isnumeric(hin)
+        h = double(hin(:).');
+    elseif isstring(hin)
+        if isscalar(hin)
+            h = str2num(char(hin)); %#ok<ST2NM>
+        else
+            h = str2double(hin(:).');
+        end
+    elseif ischar(hin)
+        h = str2num(hin); %#ok<ST2NM>
+    elseif iscell(hin)
+        h = nan(1,numel(hin));
+        for k = 1:numel(hin)
+            x = hin{k};
+            while iscell(x) && isscalar(x)
+                x = x{1};
+            end
+            if isnumeric(x) && isscalar(x)
+                h(k) = double(x);
+            elseif (isstring(x) && isscalar(x)) || ischar(x)
+                h(k) = str2double(x);
+            else
+                error(['      Error: ffn_theta(''init''): ' ...
+                    'hidden-layer widths must be numeric or text scalars.']);
+            end
+        end
+    else
+        error(['      Error: ffn_theta(''init''): ' ...
+            'net.h must be numeric, text, or a cell array.']);
+    end
+
+    h = double(h(:).');
+    if isempty(h) ...
+            || any(~isfinite(h)) ...
+            || any(h < 1) ...
+            || any(mod(h,1) ~= 0)
+        error(['      Error: ffn_theta(''init''): ' ...
+            'net.h must contain positive integers.']);
+    end
 end
 
 function tf = local_parse_transfer_functions(tfin,nH)
@@ -399,33 +539,21 @@ function phi = local_validate_phi_struct(phi)
 end
 
 
-function [nTheta,H] = forward_info(phi,A)
+function [nTheta,H,cache] = forward_info(phi,A)
 %FORWARD_INFO Forward pass with hidden-layer activations for diagnostics.
 %
-%   [nTheta,H] = forward_info(phi,A)
+%   [nTheta,H,cache] = forward_info(phi,A)
 %
 %   H{ell} is K x h_ell (basins x neurons), matching the orientation
-%   expected by information_bottleneck_SAGE. The ordinary SAGE network
+%   expected by sage_information_bottleneck. The ordinary SAGE network
 %   orientation remains neurons x basins internally.
 
-    nL = numel(phi.W);
     nH = numel(phi.tf);
-
     H = cell(1,nH);
-
-    a = A;
-    for li = 1:nL
-        z = phi.W{li}*a + phi.b{li};
-
-        if li <= nH
-            a = activate(z,phi.tf{li});
-            H{li} = a.';
-        else
-            a = sigmoid_dl(z);
-        end
+    [nTheta,cache] = forward_cache(phi,A);
+    for li = 1:nH
+        H{li} = activate(cache.Z{li},phi.tf{li}).';
     end
-
-    nTheta = a;
 end
 
 
@@ -453,6 +581,7 @@ function [Y,cache] = forward_cache(phi,A)
     end
     
     Y = a;
+    cache.Y = Y;
 
 end
 
@@ -552,7 +681,7 @@ function S = struct_divide(S,K)
 end
 
 function [dLdphi,flag,info] = local_postprocess_grad(dLdphi,clipn)
-%LOCAL_POSTPROCESS_GRAD Sanitize ANN gradients and optionally clip
+%LOCAL_POSTPROCESS_GRAD Sanitize FFN gradients and optionally clip
 %their global Euclidean norm
 
     vareps = 1e-8;
@@ -611,7 +740,7 @@ function [dLdphi,flag,info] = local_postprocess_grad(dLdphi,clipn)
     
         if ~isfinite(gn)
             warning(['      Warning: ffn_theta: ' ...
-                'non-finite ANN gradient ' ...
+                'non-finite FFN gradient ' ...
                 'norm after sanitation.']);
             flag = max(flag,3);
         elseif gn > clipn
@@ -623,7 +752,7 @@ function [dLdphi,flag,info] = local_postprocess_grad(dLdphi,clipn)
             end
             fprintf(['      Warning: ffn_theta: ' ...
                 '||dLdphi|| = %.3e exceeds ' ...
-                'clipn = %.3e; scaling ANN ' ...
+            'clipn = %.3e; scaling FFN ' ...
                 'gradient by %.3e\n'], ...
                 gn,clipn,scale);
         end
@@ -633,6 +762,8 @@ function [dLdphi,flag,info] = local_postprocess_grad(dLdphi,clipn)
 end
 
 function gn = local_gradient_norm(g)
+%LOCAL_GRADIENT_NORM Return the Euclidean norm of network gradients.
+
     gn2 = 0;
     for li = 1:numel(g.W)
         gn2 = gn2 + sum(double(g.W{li}(:)).^2) ...
@@ -642,7 +773,7 @@ function gn = local_gradient_norm(g)
 end
 
 function dLdphi = local_zero_like_phi(phi)
-%LOCAL_ZERO_LIKE_PHI Return zero ANN-gradient structure.
+%LOCAL_ZERO_LIKE_PHI Return zero FFN-gradient structure.
 
     nL = numel(phi.W);
     

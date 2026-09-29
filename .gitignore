@@ -1,5 +1,6 @@
 # SAGE outputs and external data
-results/
+results/*
+!results/.gitkeep
 Data/
 cache/
 release/
@@ -21,6 +22,7 @@ gui/
 *.pdb
 *.lib
 *.exp
+*.mexw64.*
 
 # MATLAB/editor artifacts
 *.asv

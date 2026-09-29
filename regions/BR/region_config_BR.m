@@ -183,9 +183,9 @@ function S = local_meteo_schema()
     S.variables.T.target_units = 'degC';
     S.variables.T.file = 'temperature';
     S.aux.tables.gauges.file = '../gauge_information.txt';
-    S.aux.tables.gauges.key = 'GAGE_ID';
-    S.aux.tables.gauges.lat = 'LAT';
-    S.aux.tables.gauges.area = 'DRAINAGE AREA (KM^2)';
+    S.aux.tables.gauges.key = 'gauge_id';
+    S.aux.tables.gauges.lat = 'gauge_lat';
+    S.aux.tables.gauges.area = 'area_km2';
     S.aux.tables.gauges.area_scale = 1e6;
     S.progress.label = ...
         '... Reading daily CAMELS-BR generic multi-file data';

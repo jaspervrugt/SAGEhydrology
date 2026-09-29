@@ -1,6 +1,6 @@
 function R=region_config_JM()
 %REGION_CONFIG_JM Defaults for Jamaica GRDC-Caravan.
-    R=region_config_GRDC('JM','Jamaica',12,10,8,2, ...
+    R=region_config_GRDC('JM','Jamaica',12,12,10,2, ...
         '01/10/1957','30/09/1977','01/10/1977','30/09/1997');
 
     % Declarative generic-reader schemas owned by this region module.

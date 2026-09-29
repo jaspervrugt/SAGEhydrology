@@ -1,8 +1,31 @@
 function ode = read_numsettings(ode_in)
-%READ_NUMSETTINGS Defines solver settings for each watershed
-% SYNOPSIS: ode = read_numsettings(ode_in)
-%   ode_in      OPTIONAL: structure user-defined settings ODE solver
-%   ode         Structure with settings for ODE solver
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%READ_NUMSETTINGS Complete numerical ODE settings with defaults.
+%
+%  Merge user-provided solver settings with defaults and validate positive
+%  time-step bounds.
+%
+% SYNOPSIS:
+%   ode = read_numsettings(ode_in)
+%   ode = read_numsettings()
+%
+% INPUT ARGUMENTS:
+%   ode_in          optional structure of solver-setting overrides
+%
+% OUTPUT ARGUMENTS:
+%   ode             completed numerical solver settings
+%    .InitStep       initial step; default 1e-2
+%    .MaxStep        maximum step; default 1
+%    .MinStep        minimum step; default 1e-4
+%    .RelTol         relative tolerance; default 1e-3
+%    .AbsTol         absolute tolerance; default 1e-3
+%    .Order          integration order; default 2
+%    .maxiter        maximum iterations; default 1e4
+%    .mem            state-history storage flag; default 0
+%
+% NOTES:
+%   All supplied fields are copied into ode, including custom fields.
+%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % © Written by Jasper A. Vrugt, Dec. 2025                                 %
 % University of California Irvine                                         %

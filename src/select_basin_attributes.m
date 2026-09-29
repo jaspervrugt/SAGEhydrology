@@ -1,19 +1,26 @@
 function [A,loc] = select_basin_attributes(A_reg,ID,id_selected)
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%SELECT_BASIN_ATTRIBUTES Select and order attributes for prepared basins.
+%SELECT_BASIN_ATTRIBUTES Select attributes for prepared basins.
+%
+%  Match prepared basin identifiers against the regional attribute table and
+%  retain columns in the requested run order.
 %
 % SYNOPSIS:
 %   A = select_basin_attributes(A_reg,ID,id_selected)
 %   [A,loc] = select_basin_attributes(A_reg,ID,id_selected)
 %
-% INPUT:
-%   A_reg       r-by-N attribute matrix returned by read_attr
-%   ID          N basin identifiers corresponding to columns of A_reg
-%   id_selected identifiers of the prepared basins in their run order
+% INPUT ARGUMENTS:
+%   A_reg           r-by-N matrix of regional basin attributes
+%   ID              N identifiers corresponding to columns of A_reg
+%   id_selected     K selected identifiers in run order
 %
-% OUTPUT:
-%   A           r-by-K attributes ordered as id_selected
-%   loc         K indices of the selected basins in ID
+% OUTPUT ARGUMENTS:
+%   A               r-by-K matrix in selected order; empty if A_reg is empty
+%   loc             K positions of selected basins in ID
+%
+% NOTES:
+%   Missing identifiers or mismatched attribute dimensions cause an error.
+%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % © Written by Jasper A. Vrugt, Dec. 2025 / updated Apr. 2026             %
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%

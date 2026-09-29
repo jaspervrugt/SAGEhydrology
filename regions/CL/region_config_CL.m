@@ -141,6 +141,13 @@ function S = local_meteo_schema()
     S.variables.T.units = 'degC'; 
     S.variables.T.target_units = 'degC';
     S.variables.T.invalid_le = -99;
+    S.variables.SWE.files = {'swe/13_CAMELScl_swe.txt'};
+    S.variables.SWE.units = 'mm';
+    S.variables.SWE.target_units = 'mm';
+    S.variables.SWE.source_description = ...
+        'CAMELS-CL UCLA SWE Reanalysis';
+    S.variables.SWE.invalid_le = -99;
+    S.variables.SWE.clip_min = 0;
     S.aux.tables.gauge.file = '../gauge_information.txt';
     S.aux.tables.gauge.key = 'gauge_id'; 
     S.aux.tables.gauge.lat = 'gauge_lat';

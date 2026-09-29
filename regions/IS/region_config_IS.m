@@ -24,9 +24,6 @@ function R = region_config_IS()
     X.basins.file = 'IS_111_basins.txt';
     X.basins.training = 90;
     X.basins.evaluation = 21;
-    X.basins.excluded_gauges = {'97'};
-    X.basins.exclusion_reason = { ...
-        'documented gauge-basin mapping inconsistency'};
     X.period.spinup_days = 365;
     X.period.manual.train_start = '01/10/2012';
     X.period.manual.train_end = '30/09/2020';

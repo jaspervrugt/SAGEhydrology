@@ -1,177 +1,48 @@
 function varargout = plot_SAGE(part,mdl,dat,bas,prd,Q,curr, ...
     Qfdc,region,tTheta,latlon,nTheta,At,An,gaugescen)
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%PLOT_SAGE Makes figures of SAGE results
+%PLOT_SAGE Generate SAGE and SITE result figures.
 %
-% SYNOPSIS: plot_SAGE(part,mdl,dat,bas,prd,Q,curr,Qfdc,region, ...
-%   tTheta,latlon,nTheta,At,An,gaugescen)
-%  zoneTbl = plot_SAGE(part,mdl,dat,bas,prd,Q,curr,Qfdc, ...
-%   region,tTheta,latlon,nTheta,At,An,gaugescen)
-%   part        which data are analyzed?
-%     'site'    single-site training results
-%     'sage'    SAGE training results
-%     'sage_multi' combined SAGE output from multiple model workspaces;
-%                  used by the paper hydrograph composer
-%   mdl         structure with model state/parameter information
-%    .model      choice of model
-%                 1 hymod
-%                 2 hmodel
-%                 3 sacsma
-%                 4 xinanjiang
-%                 5 gr4jA
-%                 6 hbv
-%                 7 gr4jB [analytic routing]
-%    .mcode      scalar with numerical solution of watershed model
-%                 1 Runge Kutta implementation MATLAB
-%                 2 ode45 implementation MATLAB
-%                 3 Explicit Euler MATLAB
-%                 4 Runge Kutta implementation C++
-%    .calc       model execution
-%      'seq'      sequential execution of watersheds
-%      'par'      parallel execution of watersheds
-%    .mode       assessment design
-%                 1 = training basins only | training period only
-%                 2 = training basins only | training and evaluation
-%                     period/mask
-%                 3 = training and evaluation basins | training period only
-%                 4 = training and evaluation basins | training and
-%                     evaluation period/mask
-%    .sp_method  string with split design
-%                 'manual'
-%                 'deterministic_block'
-%                 'traditional_block'
-%                 'block'
-%                 'random_block'
-%                 'random'
-%                 'deterministic_kfold'
-%                 'random_kfold'
-%    .names      list of model names
-%    .y0         mx1 vector of initial states
-%    .pspace     0 hydrologic, 1 unit cube, 2 unconstrained parameters
-%    .th_min     dx1 vector of lower parameter values
-%    .th_max     dx1 vector of upper parameter values
-%    .par_names  1xd cell with parameter names
-%    .tout       model output times
-%    .idx        indices training + evaluation periods
-%    .id_train   indices training period
-%    .id_eval    indices evaluation period
-%   dat         cell structure with basin data
-%    {k}.gauge    gauge code of basin k
-%    {k}.y_n     observed discharge series [normalized]
-%    {k}.bad     logical vector with invalid observations
-%   bas         structure with basin information
-%    .K          total number of watersheds
-%    .K_t        number of training watersheds
-%    .K_e        number of evaluation watersheds
-%    .r          number of basin attributes
-%    .gname      gauge names in final basin order [train; eval]
-%    .id_gauge    gauge codes in final basin order [train; eval]
-%    .zone       structure with hydroclimatic basin classification
-%     .id         (K_t+K_e)x1 string array with zone labels per basin
-%                 e.g., "humid_rain", "subhumid_snow", "dry_rain"
-%     .num        (K_t+K_e)x1 numeric vector with integer zone identifiers
-%     .names      mx1 string array with unique zone names
-%     .aridity    (K_t+K_e)x1 vector of aridity index values
-%     .frac_snow  (K_t+K_e)x1 vector of snow-fraction values
-%   prd         structure about training/evaluation/spin-up period
-%    .dt         temporal data resolution [1 daily, 24 hourly, 96 at 15-minute]
-%    .spinup     spin-up period in days
-%    .[others]   depends on mdl.sp_method
-%   Q           discharge structure
-%    .tt         discharge, training basins | training period
-%    .te         discharge, training basins | evaluation period/mask
-%    .et         discharge, evaluation basins | training period
-%    .ee         discharge, evaluation basins | evaluation period/mask
-%   curr        current basin-wise performance structure
-%    .NSE        NSE structure
-%      .tt       training basins | training period/mask
-%      .te       training basins | evaluation period/mask
-%      .et       evaluation basins | training period/mask
-%      .ee       evaluation basins | evaluation period/mask
-%    .KGE        KGE structure
-%      .tt/.te/.et/.ee as defined above
-%    .S_fdc      flow-duration-curve skill structure
-%      .tt/.te/.et/.ee as defined above
-%    .JKGE       JKGE structure
-%      .tt/.te/.et/.ee as defined above
-%   Qfdc        Flow duration curve of gaugescen
-%    .id
-%    .gauge
-%    .req       
-%    .qy        cell structure simulated/measured q
-%   region      CAMELS data region (US, GB, BZ, AU, etc.)
-%   tTheta        OPTIONAL: parameter-trace summaries
-%               preferred size: (i_max)xdx7: 5,15,25,50,75,85,95%
-%               Set [] if no trace figure is desired
-%   latlon      OPTIONAL: (K_t+K_e)x2 matrix lat/long (°) selected basins
-%   nTheta         OPTIONAL: normalized hydrologic parameter values
-%    'site'      dxKxn_m array, one layer per model
-%    'sage'      dx(K_t+K_e)x1 array for the submitted SAGE model
-%   At          OPTIONAL: d x K_t matrix time-weighted parameter
-%                attribution values retained for training watersheds only
-%   An          OPTIONAL: d x K_t matrix net gradient-based
-%                attribution values retained for training watersheds only
-%   gaugescen    OPTIONAL: basin selection structure
-%    .tt         requested basins for training basins | training period
-%    .te         requested basins for training basins | evaluation period
-%    .et         requested basins for evaluation basins | training period
-%    .ee         requested basins for evaluation basins | evaluation period
-%    .train      applied to training-basin plots
-%    .eval       applied to evaluation-basin plots
+%  Plots performance, traces, maps, variograms, attribution, hydrographs,
+%  and flow-duration curves.
 %
-% OUTPUT:
-%   zoneTbl     OPTIONAL table with zone/scenario/model summaries for the
-%               GUI postprocessor table. Columns include Zone, ZoneName,
-%               Scenario, ScenarioName, Model, n, T_NSE, T_KGE, T_JKGE, and
-%               S_IB.
+% SYNOPSIS:
+%   plot_SAGE(part,mdl,dat,bas,prd,Q,curr,Qfdc, ...
+%       region,tTheta,latlon,nTheta,At,An,gaugescen)
 %
-% KEY PHILOSOPHY: 
-%  global split: 
-%    use mdl.id_train / mdl.id_eval
-%  local rainfall split:
-%    use dat{k}.id_train / dat{k}.id_eval
-%    store Q on full scored window 
+% INPUT ARGUMENTS:
+%   part            'site', 'sage', or 'sage_multi'
+%   mdl             model and split settings
+%   dat             basin forcing and observations
+%   bas             basin IDs, names, counts, and zones
+%   prd             time-resolution and period settings
+%   Q               scenario-specific simulated discharge
+%   curr            grouped basin performance metrics
+%   Qfdc            optional flow-duration-curve simulations
+%   region          optional region code; default 'US'
+%   tTheta          optional parameter traces
+%   latlon          optional basin coordinates
+%   nTheta          optional normalized model parameters
+%   At              optional attribution values
+%   An              optional net attribution values
+%   gaugescen       optional resolved gauge/scenario selections
+%
+% OUTPUT ARGUMENTS:
+%   varargout       optional handles or results for selected plot mode
 %
 % NOTES:
-%   1. This version uses one notation only
-%        tt = training basins | training period
-%        te = training basins | evaluation period/mask
-%        et = evaluation basins | training period
-%        ee = evaluation basins | evaluation period/mask
-%   2a. Figure 2:
-%        1x4 ECDF panel of NSE for tt | te | et | ee
-%   2b. Figure 3:
-%        1x4 ECDF panel of KGE for tt | te | et | ee
-%   2c. Figure 4:
-%        1x4 ECDF panel of JKGE for tt | te | et | ee
-%   2d. Figure 5:
-%        1x4 ECDF panel of NSE for hydroclimatic zone
-%   2e. Figure 6:
-%        1x4 ECDF panel of KGE for hydroclimatic zone
-%   2f. Figure 7:
-%        1x4 ECDF panel of JKGE for hydroclimatic zone
-%   3a. Figure 11:
-%        parameter traces
-%   3b. Figure 12:
-%        regional parameter maps
-%   3c. Figure 13:
-%        regional variogram figures
-%   3d. Figures 14-15
-%        parameter attribution  
-%   4.  Figure 20+: 
-%        time-series figures generated separately for each scenario
-%   5.  Figure 200+: 
-%        flow duration curves generated separately for each scenario
+%   Scenario codes tt, te, et, and ee denote training or evaluation basins
+%   crossed with training or evaluation periods. Global splits use mdl
+%   indices; local splits use each basin's indices.
 %
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
 % © Written by Jasper A. Vrugt, Feb. 2026 / updated Aug. 2026             %
 % University of California, Irvine                                        %
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
     NSE = curr.NSE;
     KGE = curr.KGE;
-    S_fdc = curr.S_fdc;
+    %S_fdc = curr.S_fdc;
     JKGE = curr.JKGE;
 
     % defaults for optional inputs
@@ -211,6 +82,8 @@ function varargout = plot_SAGE(part,mdl,dat,bas,prd,Q,curr, ...
             || isempty(gaugescen)
         gaugescen = struct();
     end
+    [S_fdc,fdcMetricTag,fdcMetricDescription] = ...
+        local_selected_fdc_skill(curr,gaugescen);
     paperResultsOnly = isstruct(gaugescen) ...
         && isfield(gaugescen,'paper_results_only') ...
         && ~isempty(gaugescen.paper_results_only) ...
@@ -291,19 +164,20 @@ function varargout = plot_SAGE(part,mdl,dat,bas,prd,Q,curr, ...
     ppi = get(0,'ScreenPixelsPerInch');
     scr = get(0,'ScreenSize');
     figW = scr(3) / ppi;
-    figH = scr(4) / ppi;            % 92.5% of screen height
+    figH = scr(4) / ppi;                % 92.5% of screen height
     
     % ---------- colors ----------
     colors = [ ...
-        214/255  39/255  40/255; ... % red    - hymod
-         44/255 160/255  44/255; ... % green  - hmodel
-        148/255 103/255 189/255; ... % purple - sacsma
-        140/255  86/255  75/255; ... % brown  - Xinanjiang
-         31/255 119/255 180/255; ... % blue   - gr4jA
-        255/255 127/255  14/255; ... % orange - hbv
-        0.0000 0.7000 0.7000;   ... % teal    — gr4jB
-        0.9000 0.0000 0.9000;   ... % magenta — cfe_nwm
-        0.6500 0.6500 0.6500];      % gray    — unknown
+        214/255  39/255  40/255; ...    % red    - hymod
+         44/255 160/255  44/255; ...    % green  - hmodel
+        148/255 103/255 189/255; ...    % purple - sacsma
+        140/255  86/255  75/255; ...    % brown  - Xinanjiang
+         31/255 119/255 180/255; ...    % blue   - gr4j
+        255/255 127/255  14/255; ...    % orange - hbv
+        0.9000 0.0000 0.9000;   ...     % magenta - cfe_nwm
+        0.8500 0.3250 0.0980;   ...     % copper  - gchm (model 11)
+        0.4940 0.1840 0.5560;   ...     % violet  - user_model (model 99)
+        0.6500 0.6500 0.6500];          % gray    - unknown
     
     fontsize_legend = 16;
     face_alpha = 0.50;
@@ -312,11 +186,11 @@ function varargout = plot_SAGE(part,mdl,dat,bas,prd,Q,curr, ...
     
     % % soft background shading
     % cShadeTrain = [0.90 0.94 0.98];   % blue-gray
-    % cShadeEval = [0.99 0.94 0.88];   % warm orange-gray
+    % cShadeEval = [0.99 0.94 0.88];    % warm orange-gray
     % 
     % % muted data-point colors
     % cPtTrain = [0.20 0.45 0.70];      % muted blue
-    % cPtEval = [0.85 0.50 0.20];      % muted orange
+    % cPtEval = [0.85 0.50 0.20];       % muted orange
     cShadeTrain = [0.94 0.94 0.94];
     cShadeEval = [0.90 0.92 0.96];
     
@@ -362,7 +236,11 @@ function varargout = plot_SAGE(part,mdl,dat,bas,prd,Q,curr, ...
             model_name_fig = 'SAGE';
         else
             model_name_fig = local_model_display_name( ...
-                model_names{mdl.model(1)});
+                sage_model_name(mdl.model(1)));
+            if isfield(mdl,'variant') ...
+                    && strcmpi(string(mdl.variant),'gchm_ode')
+                model_name_fig = 'GCHM_ODE';
+            end
         end
     elseif strcmpi(part,'sage_multi')
         model_name_fig = 'SAGE';
@@ -446,20 +324,6 @@ function varargout = plot_SAGE(part,mdl,dat,bas,prd,Q,curr, ...
         Sfdcplot,Qplot,dt_str,K_t,K_e,id_tr,id_ev, ...
         gaugescen,samp_word);
     
-    % --------------------------------------------------
-    % Zone/scenario summary table for GUI postprocessor
-    % --------------------------------------------------
-    try
-        zoneTbl = local_build_zone_summary_table( ...
-            bas,scenariosNSE,scenariosKGE,scenariosJKGE,scenariosSfdc, ...
-            n_m,id_model,model_names);
-    catch ME
-        warning('plot_SAGE:zoneSummaryFailed', ...
-            ['      Warning: zone summary table failed. ', ...
-             'Continuing with figures.\n%s'],ME.message);
-        zoneTbl = table();
-    end
-    
     % =============================
     % Figures: ECDF figure printing
     % =============================
@@ -470,8 +334,8 @@ function varargout = plot_SAGE(part,mdl,dat,bas,prd,Q,curr, ...
         % ===========================================
         plot_metric_ecdf_figure(2, ...
             part,mdl, ...
-            dt_str,samp_word, ...
-            scenariosNSE,n_m,id_model, ...
+            dt_str,scenariosNSE, ...
+            n_m,id_model, ...
             model_names, ...
             colors,figW,figH,model_name_fig,'NSE', ...
             'Nash-Sutcliffe Efficiency');
@@ -481,8 +345,8 @@ function varargout = plot_SAGE(part,mdl,dat,bas,prd,Q,curr, ...
         % ===========================================
         plot_metric_ecdf_figure(3, ...
             part,mdl, ...
-            dt_str,samp_word, ...
-            scenariosKGE,n_m,id_model, ...
+            dt_str,scenariosKGE, ...
+            n_m,id_model, ...
             model_names, ...
             colors,figW,figH,model_name_fig,'KGE', ...
             'Kling-Gupta Efficiency');
@@ -494,8 +358,8 @@ function varargout = plot_SAGE(part,mdl,dat,bas,prd,Q,curr, ...
         if hasJKGE
             plot_metric_ecdf_figure(4, ...
                 part,mdl, ...
-                dt_str,samp_word, ...
-                scenariosJKGE,n_m,id_model, ...
+                dt_str,scenariosJKGE, ...
+                n_m,id_model, ...
                 model_names, ...
                 colors,figW,figH,model_name_fig, ...
                 'JKGE', ...
@@ -504,31 +368,32 @@ function varargout = plot_SAGE(part,mdl,dat,bas,prd,Q,curr, ...
             % available, retain it as Figure 4 and add S_FDC as Figure 5.
             plot_metric_ecdf_figure(5, ...
                 part,mdl, ...
-                dt_str,samp_word, ...
-                scenariosSfdc,n_m,id_model, ...
+                dt_str,scenariosSfdc, ...
+                n_m,id_model, ...
                 model_names, ...
                 colors,figW,figH,model_name_fig, ...
-                'S_{\rm FDC}', ...
-                'Flow-duration-curve skill');
+                fdcMetricTag,fdcMetricDescription);
             firstZoneFigure = 6;
         else
             plot_metric_ecdf_figure(4, ...
                 part,mdl, ...
-                dt_str,samp_word, ...
-                scenariosSfdc,n_m,id_model, ...
+                dt_str,scenariosSfdc, ...
+                n_m,id_model, ...
                 model_names, ...
                 colors,figW,figH,model_name_fig, ...
-                'S_{\rm FDC}', ...
-                'Flow-duration-curve skill');
+                fdcMetricTag,fdcMetricDescription);
             firstZoneFigure = 5;
         end
-        if paperResultsOnly, fprintf('  plot_SAGE: zonal ECDFs ...\n'); end
+        if paperResultsOnly
+            fprintf('  plot_SAGE: zonal ECDFs ...\n'); 
+        end
         
         % =======================================
         % Figure 5: 1x4 ECDF panel of NSE by zone
         % =======================================
         zoneIDsForLayout = [];
-        if isfield(bas,'zone') && isfield(bas.zone,'num')
+        if isfield(bas,'zone') ...
+                && isfield(bas.zone,'num')
             zoneIDsForLayout = unique(double(bas.zone.num(:)));
             zoneIDsForLayout = zoneIDsForLayout( ...
                 isfinite(zoneIDsForLayout) & zoneIDsForLayout > 0);
@@ -538,7 +403,8 @@ function varargout = plot_SAGE(part,mdl,dat,bas,prd,Q,curr, ...
                 && isfield(gaugescen,'zone_ecdf_columns') ...
                 && ~isempty(gaugescen.zone_ecdf_columns)
             requestedColumns = double(gaugescen.zone_ecdf_columns(1));
-            if isfinite(requestedColumns) && requestedColumns >= 1
+            if isfinite(requestedColumns) ...
+                    && requestedColumns >= 1
                 zonesPerPage = max(1,round(requestedColumns));
             end
         end
@@ -585,8 +451,7 @@ function varargout = plot_SAGE(part,mdl,dat,bas,prd,Q,curr, ...
                 scenariosSfdc,n_m,id_model, ...
                 model_names,colors,figW,figH, ...
                 model_name_fig, ...
-                'S_{\rm FDC}', ...
-                'Flow-duration-curve skill',bas, ...
+                fdcMetricTag,fdcMetricDescription,bas, ...
                 zonesPerPage);
         end
     
@@ -623,7 +488,10 @@ function varargout = plot_SAGE(part,mdl,dat,bas,prd,Q,curr, ...
     if strcmpi(part,'sage') ...
             && ~isempty(nTheta) ...
             && ~isempty(latlon)
-        if paperResultsOnly, fprintf('  plot_SAGE: country-border parameter maps ...\n'); end
+        if paperResultsOnly
+            fprintf(['  plot_SAGE: ' ...
+                'country-border parameter maps ...\n']); 
+        end
         try
             if plot_map == 1
                 plot_parameter_maps_figure(12, ...
@@ -713,63 +581,55 @@ function varargout = plot_SAGE(part,mdl,dat,bas,prd,Q,curr, ...
     % =========================================
 
     if ~paperResultsOnly
-    try
-        if local_use_four_scenario_timeseries(sp_method)
-            local_plot_timeseries_fourgroups( ...
-                20,part,mdl,dat,bas,prd,scenariosNSE, ...
-                q_unit,t_unit,dt_fig_str,n_m,id_model, ...
-                colors,model_names,id_dat,Qfdc,Bprt,n_char, ...
-                figW,figH,model_name_fig,samp_word, ...
-                fontsize_legend,region,sp_method, ...
-                cShadeTrain,cShadeEval,face_alpha);
-        else
-            local_plot_timeseries_postprocessor( ...
-                20,part,mdl,dat,bas,prd,Q,Qfdc,gaugescen, ...
-                q_unit,t_unit,dt_fig_str,n_m,id_model, ...
-                colors,model_names,id_dat,Bprt,n_char, ...
-                figW,figH,model_name_fig,sp_method, ...
-                fontsize_legend,cPtTrain,cPtEval, ...
-                cShadeTrain,cShadeEval,face_alpha, ...
-                marker_alpha,region);
+        try
+            if local_use_four_scenario_timeseries(sp_method)
+                local_plot_timeseries_fourgroups( ...
+                    20,mdl,dat,bas,prd,scenariosNSE, ...
+                    q_unit,t_unit,n_m,id_model, ...
+                    colors,model_names,id_dat,Qfdc,Bprt,n_char, ...
+                    figW,figH,model_name_fig, ...
+                    fontsize_legend,region,sp_method, ...
+                    cShadeTrain,cShadeEval,face_alpha);
+            else
+                local_plot_timeseries_postprocessor( ...
+                    20,mdl,dat,bas,prd,Q,Qfdc,gaugescen, ...
+                    q_unit,t_unit,dt_fig_str,n_m,id_model, ...
+                    colors,model_names,id_dat,Bprt,n_char, ...
+                    figW,figH,model_name_fig,sp_method, ...
+                    fontsize_legend,cPtTrain,cPtEval, ...
+                    cShadeTrain,cShadeEval,face_alpha, ...
+                    marker_alpha,region);
+            end
+        catch ME
+            warning('plot_SAGE:timeSeriesFailed', ...
+                ['      Warning: plot_SAGE: ' ...
+                'time-series figures ' ...
+                'could not be created and ' ...
+                'will be skipped.\n%s'], ...
+                getReport(ME,'extended', ...
+                'hyperlinks','off'));
         end
-    catch ME
-        warning('plot_SAGE:timeSeriesFailed', ...
-            ['      Warning: plot_SAGE: ' ...
-            'time-series figures ' ...
-            'could not be created and ' ...
-            'will be skipped.\n%s'], ...
-            getReport(ME,'extended', ...
-            'hyperlinks','off'));
-    end
     end
     
     % =================================
     % Figure 200+: flow duration curves
     % =================================
     if ~paperResultsOnly
-    try
-        local_plot_fdc_postprocessor( ...
-            200,part,dt_str,mdl,dat,bas,Qfdc, ...
-            model_name_fig,q_unit,figH, ...
-            fontsize_legend,samp_word,region);
-    catch ME
-        warning('plot_SAGE:FDCFailed', ...
-            ['      Warning: plot_SAGE: ' ...
-            'FDC figures could not be ' ...
-            'created and will be skipped.\n%s'], ...
-             ME.message);
-    end
+        try
+            local_plot_fdc_postprocessor( ...
+                200,part,dt_str,mdl,dat,bas,Qfdc, ...
+                model_name_fig,q_unit,figH, ...
+                fontsize_legend,samp_word,region);
+        catch ME
+            warning('plot_SAGE:FDCFailed', ...
+                ['      Warning: plot_SAGE: ' ...
+                'FDC figures could not be ' ...
+                'created and will be skipped.\n%s'], ...
+                 ME.message);
+        end
     end
     % ========================================
     
-    try
-        setappdata(0,'SAGE_zone_summary_table',zoneTbl);
-    catch
-    end
-    
-    if nargout >= 1
-        varargout{1} = zoneTbl;
-    end
 
 end
 
@@ -777,7 +637,7 @@ end
 % helper functions
 % ================
 function plot_metric_ecdf_figure(figNo,part, ...
-    mdl,dt_str,samp_word,scenarios,n_m,id_model, ...
+    mdl,dt_str,scenarios,n_m,id_model, ...
     model_names,colors,figW,figH,model_name_fig, ...
     metric_tag,xlab_str)
 %PLOT_METRIC_ECDF_FIGURE Plots scenario-specific ECDFs for one metric.
@@ -847,7 +707,7 @@ function plot_metric_ecdf_figure(figNo,part, ...
             'ticklength',[0.02 0.02]);
         try
             ax(ii).XRuler.TickLabelGapOffset = ...
-                0.5*ax(ii).XRuler.TickLabelGapOffset;
+                0.4*ax(ii).XRuler.TickLabelGapOffset;
         catch
         end
         
@@ -925,10 +785,10 @@ function plot_metric_ecdf_figure(figNo,part, ...
         end
     
         for mdl_i = 1:n_m
-            c = colors(id_model( ...
-                min(mdl_i,numel(id_model))),:);
+            c = local_model_color(colors,id_model( ...
+                min(mdl_i,numel(id_model))));
             im = id_model(min(mdl_i,numel(id_model)));
-            nam = local_model_display_name(model_names{im});
+            nam = local_model_plot_name(model_names,im);
             nFinite = nnz(isfinite(M(:,mdl_i)));
             lbl = sprintf(['\\texttt{%s}\\; ' ...
                 '($n = %d$)'], ...
@@ -958,7 +818,7 @@ function plot_metric_ecdf_figure(figNo,part, ...
     if any(strcmpi(metric_tag,{'NSE','KGE','JKGE'}))
         metric_title = sprintf('$\\mathrm{%s}$',metric_tag);
     else
-        metric_title = sprintf('$%s$',metric_tag);
+        metric_title = sprintf('$%s$',local_metric_symbol(metric_tag));
     end
     annotation(fig,'textbox',[0.02 0.925 0.96 0.060], ...
         'String',sprintf(['$\\texttt{%s}$: ' ...
@@ -1032,6 +892,7 @@ function plot_metric_ecdf_by_zone_figure( ...
     
             set(axh,'tickdir','out', ...
                 'ticklength',[0.015 0.015], ...
+                'FontName','Candara', ...
                 'fontsize',13, ...
                 'linewidth',1);
     
@@ -1045,10 +906,12 @@ function plot_metric_ecdf_by_zone_figure( ...
                 if zid <= numel(zoneNames)
                     title(axh,{sprintf('Zone %d',zid), ...
                         char(string(zoneNames(zid)))}, ...
-                        'Interpreter','none','FontSize',12);
+                        'Interpreter','none','FontName','Candara', ...
+                        'FontSize',12,'FontWeight','bold');
                 else
                     title(axh,sprintf('Zone %d',zid), ...
-                        'Interpreter','none','FontSize',12);
+                        'Interpreter','none','FontName','Candara', ...
+                        'FontSize',12,'FontWeight','bold');
                 end
             end
             
@@ -1057,15 +920,24 @@ function plot_metric_ecdf_by_zone_figure( ...
             if izPage == 1
                 ytxt = local_scenario_ylabel(is,samp_word);
                 ylabel(axh,ytxt, ...
-                    'interpreter','latex', ...
-                    'fontsize',13);
+                    'interpreter','none', ...
+                    'FontName','Candara', ...
+                    'FontSize',12, ...
+                    'FontWeight','bold');
             else
                 axh.YTickLabel = [];
             end
     
             if is == nScen
-                xlabel(axh,['$' local_metric_symbol(metric_tag) '$'], ...
-                    'interpreter','latex', ...
+                % Keep the bottom-row tick values close to the x axis in
+                % both MATLAB and the rasterized PowerPoint output.
+                if isprop(axh.XRuler,'TickLabelGapMultiplier')
+                    axh.XRuler.TickLabelGapMultiplier = ...
+                        0.5*axh.XRuler.TickLabelGapMultiplier;
+                end
+                xlabel(axh,local_metric_candara_symbol(metric_tag), ...
+                    'interpreter','tex', ...
+                    'FontName','Candara', ...
                     'fontsize',12);
             else
                 axh.XTickLabel = [];
@@ -1112,13 +984,11 @@ function plot_metric_ecdf_by_zone_figure( ...
             end
     
             for mdl_i = 1:n_m
-                c = colors(id_model( ...
-                    min(mdl_i,numel(id_model))),:);
+                c = local_model_color(colors,id_model( ...
+                    min(mdl_i,numel(id_model))));
                 im = id_model( ...
                     min(mdl_i,numel(id_model)));
-                nam = ...
-                    local_model_display_name( ...
-                    model_names{im});
+                nam = local_model_plot_name(model_names,im);
                 lbl = ['\texttt{' local_latex_escape(nam) '}'];
     
                 plot_ecdf_panel(axh, ...
@@ -1160,18 +1030,24 @@ function plot_metric_ecdf_by_zone_figure( ...
         end
 
         part_name = local_part_name(part,mdl);
-        part_name_tex = strrep(part_name,'_','\_');
-        if any(strcmpi(metric_tag,{'NSE','KGE','JKGE'}))
-            metric_title = sprintf('$\\mathrm{%s}$',metric_tag);
-        else
-            metric_title = sprintf('$%s$',metric_tag);
-        end
-        titleLine1 = sprintf('$\\texttt{%s}$: %s %s ECDF', ...
-            part_name_tex,dt_str,metric_title);
+        metric_title = local_metric_candara_symbol(metric_tag);
+        titleLine1 = sprintf('%s: %s %s ECDF', ...
+            part_name,dt_str,metric_title);
         titleLine2 = sprintf(['hydroclimatic zone and basin/%s ' ...
             'scenario --- %d/%d'],samp_word,page,nPage);
-        sgtitle(tlo,{titleLine1,titleLine2}, ...
-            'Interpreter','latex','FontSize',15);
+        % Separate full-width text boxes center each line independently.
+        % A multiline TeX sgtitle can left-align lines containing subscripts.
+        tlo.OuterPosition = [0 0 1 0.915];
+        annotation(f,'textbox',[0.02 0.955 0.96 0.04], ...
+            'String',titleLine1,'Interpreter','tex', ...
+            'FontName','Candara','FontSize',16,'FontWeight','normal', ...
+            'HorizontalAlignment','center','VerticalAlignment','middle', ...
+            'EdgeColor','none','Margin',0,'FitBoxToText','off');
+        annotation(f,'textbox',[0.02 0.915 0.96 0.04], ...
+            'String',titleLine2,'Interpreter','none', ...
+            'FontName','Candara','FontSize',16,'FontWeight','normal', ...
+            'HorizontalAlignment','center','VerticalAlignment','middle', ...
+            'EdgeColor','none','Margin',0,'FitBoxToText','off');
     end
 
 end
@@ -1189,142 +1065,6 @@ function tf = local_has_data(A)
         end
     end
 end
-
-function zoneTbl = local_build_zone_summary_table( ...
-    bas,scenariosNSE,scenariosKGE,scenariosJKGE,scenariosSfdc, ...
-    n_m,id_model,model_names)
-%LOCAL_BUILD_ZONE_SUMMARY_TABLE Summarize metrics by zone and scenario
-
-    varNames = {'Zone','ZoneName','Scenario','ScenarioName', ...
-        'Model','n','T_NSE','T_KGE','T_JKGE','T_S_fdc', ...
-        'Sib_NSE','Sib_KGE','Sib_S_fdc'};
-    zoneTbl = table('Size',[0 numel(varNames)], ...
-        'VariableTypes',{'double','string','string','string', ...
-        'string','double','double','double','double','double', ...
-        'double','double','double'}, ...
-        'VariableNames',varNames);
-    
-    if ~isfield(bas,'zone') ...
-            || ~isfield(bas.zone,'num') ...
-            || isempty(bas.zone.num)
-        return
-    end
-    
-    zoneNo = double(bas.zone.num(:));
-    zoneIDs = unique(zoneNo(isfinite(zoneNo) ...
-        & zoneNo > 0));
-    if isempty(zoneIDs)
-        return
-    end
-    zoneIDs = (1:max(zoneIDs)).';
-    zoneNames = local_zone_names_from_bas(bas);
-    
-    nScen = 4;
-    rows = cell(0,numel(varNames));
-    
-    for iz = 1:numel(zoneIDs)
-        zid = zoneIDs(iz);
-        if iz <= numel(zoneNames)
-            zname = string(zoneNames(iz));
-        else
-            zname = "Z" + string(zid);
-        end
-    
-        for is = 1:nScen
-            SN = scenariosNSE{is};
-            SK = scenariosKGE{is};
-            SJ = scenariosJKGE{is};
-            SF = scenariosSfdc{is};
-    
-            idAll = SN.id_global(:);
-            validRows = idAll >= 1 ...
-                & idAll <= numel(zoneNo);
-            rowKeep = false(numel(idAll),1);
-            tmp = zoneNo(idAll(validRows)) == zid;
-            rowKeep(validRows) = tmp(:);
-    
-            if ~any(rowKeep)
-                continue
-            end
-    
-            for mdl_i = 1:n_m
-                im = id_model(min(mdl_i, ...
-                    numel(id_model)));
-                try
-                    modelName = string( ...
-                        local_model_display_name( ...
-                        model_names{im}));
-                catch
-                    modelName = "model_" + ...
-                        string(im);
-                end
-    
-                vNSE = local_metric_col( ...
-                    SN.metric,rowKeep,mdl_i);
-                vKGE = local_metric_col( ...
-                    SK.metric,rowKeep,mdl_i);
-                vJKGE = local_metric_col( ...
-                    SJ.metric,rowKeep,mdl_i);
-                vSfdc = local_metric_col( ...
-                    SF.metric,rowKeep,mdl_i);
-    
-                nVal = max([nnz(isfinite(vNSE)), ...
-                    nnz(isfinite(vKGE)), ...
-                    nnz(isfinite(vJKGE)), ...
-                    nnz(isfinite(vSfdc))]);
-    
-                sibNSE = local_mean_one_minus(vNSE);
-                sibKGE = local_mean_one_minus(vKGE);
-                sibSfdc = local_mean_one_minus(vSfdc);
-    
-                rows(end+1,:) = {double(zid),zname, ...         
-                    string(SN.tag), ...
-                    string(SN.title),modelName, ...
-                    double(nVal),median(vNSE,'omitnan'), ...
-                    median(vKGE,'omitnan'), ...
-                    median(vJKGE,'omitnan'), ...
-                    median(vSfdc,'omitnan'), ...
-                    sibNSE,sibKGE,sibSfdc};    %#ok
-            end
-        end
-    end
-    
-    if isempty(rows)
-        return
-    end
-    
-    zoneTbl = cell2table(rows,'VariableNames',varNames);
-end
-
-function value = local_mean_one_minus(metric)
-%LOCAL_MEAN_ONE_MINUS Integrated basin loss for one performance metric.
-
-    metric = metric(isfinite(metric));
-    if isempty(metric)
-        value = NaN;
-    else
-        value = mean(1 - metric);
-    end
-end
-
-function v = local_metric_col(M,rowKeep,mdl_i)
-%LOCAL_METRIC_COL Return finite metric column for one model
-
-    v = nan(0,1);
-    if isempty(M)
-        return
-    end
-    try
-        if size(M,2) < mdl_i
-            return
-        end
-        v = M(rowKeep,mdl_i);
-        v = v(:);
-    catch
-        v = nan(0,1);
-    end
-end
-
 
 function A = local_get_metric(S, ...
     fieldName,defaultVal)
@@ -1395,10 +1135,10 @@ function plot_ecdf_panel(axh,z,c, ...
 
     z = z(:);
     z = z(isfinite(z));
-    % For plotting only: prevent extreme JKGE values from creating
-    % pathological ECDF polygons or off-axis median geometry.
+    % Keep the real lower tail when computing probabilities. Clipping the
+    % observations themselves would pile that tail up at the left border.
+    % ecdf_to_stairs_fixed clips the plotting domain instead.
     z_raw = z;
-    z = max(xL,min(xR,z));
     
     if isempty(z)
         return
@@ -1411,35 +1151,16 @@ function plot_ecdf_panel(axh,z,c, ...
     % SITE: line only
     % SAGE: line + fill + median annotation
     % -------------------------------------
-    if ~compactLabel
-        % Scenario ECDFs use the clean Paper-4 presentation: sorted values,
-        % a curve beginning at the x-axis, and shading continued to the
-        % theoretical right endpoint so no white strip remains below 1.
-        zPlot = sort(z);
-        fPlot = (1:numel(zPlot)).'/numel(zPlot);
-        if strcmpi(part,'sage')
-            p = patch(axh,[zPlot(1);zPlot;xR;xR], ...
-                [0;fPlot;1;0],c, ...
-                'facealpha',fill_alpha, ...
-                'edgealpha',0);
-            set(p,'handlevisibility','off');
-        end
-        line(axh,[zPlot(1) zPlot(1)],[0 fPlot(1)], ...
-            'color',c,'linewidth',line_width, ...
-            'handlevisibility','off');
-        hLine = plot(axh,zPlot,fPlot, ...
-            'color',c,'linewidth',line_width);
-    else
-        if strcmpi(part,'sage')
-            [xp,yp] = stairs_fill_poly(xs,fs);
-            p = patch(axh,xp,yp,c, ...
-                'facealpha',fill_alpha, ...
-                'edgealpha',0);
-            set(p,'handlevisibility','off');
-        end
-        hLine = plot(axh,xs,fs, ...
-            'color',c,'linewidth',line_width);
+    % Both summary and zone curves start at F(xL), without a false
+    % zero-to-F(xL) stroke at the clipped boundary. Interior minima still
+    % include their vertical connection from zero. Patch edges stay hidden.
+    if strcmpi(part,'sage')
+        [xp,yp] = stairs_fill_poly(xs,fs);
+        p = patch(axh,xp,yp,c, ...
+            'facealpha',fill_alpha,'edgealpha',0);
+        set(p,'handlevisibility','off');
     end
+    hLine = plot(axh,xs,fs,'color',c,'linewidth',line_width);
     set(hLine,'displayname',lbl);
     
     if strcmpi(part,'site')
@@ -1621,15 +1342,12 @@ function pick = local_pick_qfdc_ids(Qfdc,id_global,tag)
         if ~isempty(tag) ...
                 && isfield(Qfdc,'req') ...
                 && isstruct(Qfdc.req) ...
-                && isfield(Qfdc.req,tag) ...
-                && ~isempty(Qfdc.req.(tag))
+                && isfield(Qfdc.req,tag)
             req = local_numeric_vector(Qfdc.req.(tag));
             req = round(req(isfinite(req)));
             req = req(req >= 1 ...
                 & req <= numel(idsAll));
-            if ~isempty(req)
-                ids = idsAll(req);
-            end
+            ids = idsAll(req);
         end
     catch
         ids = idsAll;
@@ -2054,7 +1772,7 @@ function name = local_part_name(part,mdl)
             name = 'SAGE';
         else
             name = char(string( ...
-                mdl.names(mdl.model(1))));
+                string(sage_model_name(mdl.model(1)))));
         end
     else
         name = 'SITE';
@@ -3083,6 +2801,23 @@ function local_add_country_boundary(axh,region)
 
     persistent G
     persistent Gfile
+    persistent warnedMissing
+    
+    hasMappingSupport = ...
+        exist('readgeotable','file') == 2 ...
+        && (isdeployed ...
+        || license('test','map_toolbox'));
+
+    if ~hasMappingSupport
+        if isempty(warnedMissing)
+            warning('plot_SAGE:mappingToolboxUnavailable', ...
+                ['Mapping Toolbox is unavailable. ' ...
+                'Country outlines will be omitted; ' ...
+                'all other SAGE outputs are unaffected.']);
+            warnedMissing = true;
+        end
+        return
+    end
 
     shp = local_find_natural_earth_countries();
 
@@ -5164,7 +4899,7 @@ function VG = plot_parameter_variograms_SITE_figure( ...
 end
 
 function local_plot_timeseries_postprocessor( ...
-    figBase,part,mdl,dat,bas,prd,Q,Qfdc,gaugescen, ...
+    figBase,mdl,dat,bas,prd,Q,Qfdc,gaugescen, ...
     q_unit,t_unit,dt_str,n_m,id_model,colors, ...
     model_names,id_dat,Bprt,n_char,figW,figH, ...
     model_name_fig,sp_method,fontsize_legend, ...
@@ -5474,8 +5209,8 @@ function local_plot_basin_postprocessor(axh, ...
     
     minRunForShade = 30;
     
-    y = datk.y_n(:);
-    bad = datk.bad(:);
+    y = datk.obs.Q.value(:);
+    bad = datk.obs.Q.bad(:);
     
     if isempty(y)
         axis(axh,'off');
@@ -5689,7 +5424,7 @@ function local_plot_basin_postprocessor(axh, ...
                 numel(id_model)));
             plot(axh,x_sim,q_sim, ...
                 'linewidth',lw_sim, ...
-                'color',colors(im,:), ...
+                'color',local_model_color(colors,im), ...
                 'handlevisibility','off');
         end
     end
@@ -5808,8 +5543,9 @@ function local_plot_forcing_postprocessor( ...
     xE = id_eval(:).';
     xT = xT(xT >= 1 & xT <= n);
     xE = xE(xE >= 1 & xE <= n);
-    if isfield(datk,'bad') && ~isempty(datk.bad)
-        bad = logical(datk.bad(:));
+    if isfield(datk,'obs') && isfield(datk.obs,'Q') ...
+            && isfield(datk.obs.Q,'bad') && ~isempty(datk.obs.Q.bad)
+        bad = logical(datk.obs.Q.bad(:));
         if ~isempty(xT) && numel(bad) >= max(xT)
             xT = xT(~bad(xT));
         end
@@ -5876,8 +5612,9 @@ function local_plot_temperature_strip( ...
 
     xT = id_train(:).';
     xE = id_eval(:).';
-    if isfield(datk,'bad') && ~isempty(datk.bad)
-        bad = logical(datk.bad(:));
+    if isfield(datk,'obs') && isfield(datk.obs,'Q') ...
+            && isfield(datk.obs.Q,'bad') && ~isempty(datk.obs.Q.bad)
+        bad = logical(datk.obs.Q.bad(:));
         if ~isempty(xT) && numel(bad) >= max(xT)
             xT = xT(~bad(xT));
         end
@@ -6166,17 +5903,16 @@ function [hLeg,lblLeg] = ...
     
     % model proxies
     for ii = 1:n_m
-        c = colors(id_model(min(ii, ...
-            numel(id_model))),:);
+        c = local_model_color(colors,id_model(min(ii, ...
+            numel(id_model))));
     
         h = plot(axh,nan,nan,'-', ...
             'color',c, ...
             'linewidth',2.5);
         hLeg(end+1) = h;            %#ok
     
-        name_i = local_model_display_name( ...
-            model_names{id_model(min(ii, ...
-            numel(id_model)))});
+        name_i = local_model_plot_name(model_names, ...
+            id_model(min(ii,numel(id_model))));
     
         lblLeg{end+1} = sprintf('$\\ \\mathrm{%s}$', ...
             local_latex_escape(name_i)); %#ok
@@ -6421,6 +6157,12 @@ function hfig = local_plot_paper_hydrograph(cfg,mdl,dat,bas,prd,Q, ...
         local_plot_temperature_strip(axT(ip),dat{kdat}, ...
             forcingTrain,forcingEval,sp_method,cShadeTrain,cShadeEval, ...
             faceAlpha,qXLim,axQ(ip).LineWidth);
+        % Paper figures: enlarge T<0 slightly and align it more closely
+        % with the precipitation and discharge labels to its left.
+        temperatureLabel = axT(ip).YLabel;
+        temperatureLabel.Units = 'normalized';
+        temperatureLabel.FontSize = 15;
+        temperatureLabel.Position(1) = -0.035;
         linkaxes([axF(ip),axT(ip),axQ(ip)],'x');
         xlim(axQ(ip),qXLim);
         local_set_multiyear_ticks_paper(axQ(ip),tag,prd,idxPlot);
@@ -6433,10 +6175,10 @@ function hfig = local_plot_paper_hydrograph(cfg,mdl,dat,bas,prd,Q, ...
             panelTitle = sprintf('USGS ID %s',string(P.gauge));
         end
         text(axF(ip),0.01,1.03,panelTitle,'Units','normalized', ...
-            'FontName','Times New Roman','FontSize',18, ...
+            'FontName','Candara','FontSize',18, ...
             'Interpreter','none','HorizontalAlignment','left', ...
             'VerticalAlignment','bottom','Clipping','off');
-        if numel(waterYears) == 1
+        if isscalar(waterYears)
             periodLabel = sprintf('Water Year %d',waterYears(1));
         else
             periodLabel = sprintf('Water Years %d--%d', ...
@@ -6448,10 +6190,10 @@ function hfig = local_plot_paper_hydrograph(cfg,mdl,dat,bas,prd,Q, ...
         % Keep paper labels clear of their tick values. Normalized offsets
         % remain stable when the discharge or forcing ranges change.
         axQ(ip).XLabel.Units = 'normalized';
-        axQ(ip).XLabel.Position(2) = -0.155;
+        axQ(ip).XLabel.Position(2) = -0.110;
         % P and Q are axes-relative text objects, independent of tick widths.
         leftLabelOffset = 60;
-        rightLabelX = 1.035;
+        rightLabelX = 1.055;
         local_position_timeseries_ylabels( ...
             axF(ip),axQ(ip),leftLabelOffset);
         try
@@ -6465,8 +6207,14 @@ function hfig = local_plot_paper_hydrograph(cfg,mdl,dat,bas,prd,Q, ...
         end
     end
 
-    set([axF;axQ],'FontName','Times New Roman','FontSize',16, ...
+    set([axF;axQ],'FontName','Times New Roman','FontSize',17, ...
         'TickDir','out','Layer','top');
+    for ia = 1:numel(axF)
+        try
+            axF(ia).YAxis(2).Label.FontSize = 18;
+        catch
+        end
+    end
     for ia = 1:numel(axQ)
         % Bring month names closer to the discharge axis while leaving the
         % water-year label farther below them.
@@ -6539,10 +6287,10 @@ function local_add_paper_timeseries_legend(ax,n_m,id_model, ...
     xl = xlim(ax); yl = ylim(ax);
     % Place the manual legend beside the left y-axis. Keeping it away from
     % the right side avoids the principal hydrograph peaks and observations.
-    x1 = xl(1) + 0.138*(xl(2)-xl(1));
-    dx = 0.04*(xl(2)-xl(1));
-    y1 = yl(1) + 0.92*(yl(2)-yl(1));
-    dy = 0.085*(yl(2)-yl(1));
+    x1 = xl(1) + 0.054*(xl(2)-xl(1));
+    dx = 1.5*0.04*(xl(2)-xl(1));
+    y1 = yl(1) + 0.95*(yl(2)-yl(1));
+    dy = 0.70*0.085*(yl(2)-yl(1));
     cObs = [0.25 0.25 0.25];
     % Keep hydrograph peaks and observation points from crossing the
     % legend. The nearly opaque backing is restricted to the legend area.
@@ -6559,36 +6307,37 @@ function local_add_paper_timeseries_legend(ax,n_m,id_model, ...
         'MarkerFaceColor',cObs,'MarkerEdgeColor',cObs, ...
         'HandleVisibility','off');
     text(ax,x1+dx,y1,' Observed','Color',cObs, ...
-        'FontName','Times New Roman','FontSize',14, ...
+        'FontName','Times New Roman','FontSize',15, ...
         'FontWeight','bold', ...
         'VerticalAlignment','middle');
     for i = 1:n_m
         y = y1-i*dy;
         im = id_model(min(i,numel(id_model)));
-        c = colors(im,:);
-        line(ax,[x1 x1+dx],[y y],'Color',c,'LineWidth',2.2, ...
+        c = local_model_color(colors,im);
+        line(ax,[x1 x1+dx],[y y],'Color',c,'LineWidth',3.0, ...
             'HandleVisibility','off');
-        label = local_model_display_name(model_names{im});
-        text(ax,x1+dx,y,[' ' label],'Color',c, ...
-            'FontName','Times New Roman','FontSize',14, ...
+        label = local_model_plot_name(model_names,im);
+        legendText = ['$\;\texttt{' local_latex_escape(label) '}$'];
+        text(ax,x1+dx,y,legendText,'Color',c, ...
+            'FontName','Times New Roman','FontSize',15, ...
             'FontWeight','bold', ...
-            'VerticalAlignment','middle');
+            'Interpreter','latex','VerticalAlignment','middle');
     end
 end
 
 function local_plot_timeseries_fourgroups( ...
-    figBase,part,mdl,dat,bas,prd,scenarios, ...
-    q_unit,t_unit,dt_str,n_m,id_model, ...
+    figBase,mdl,dat,bas,prd,scenarios, ...
+    q_unit,t_unit,n_m,id_model, ...
     colors,model_names,id_dat,Qfdc,Bprt, ...
-    n_char,figW,figH,model_name_fig,samp_word, ...
+    n_char,figW,figH,model_name_fig, ...
     fontsize_legend,region,sp_method, ...
     cShadeTrain,cShadeEval,face_alpha)
 %LOCAL_PLOT_TIMESERIES_FOURGROUPS Plot four explicit basin/period groups
 % SYNOPSIS:
 %   local_plot_timeseries_fourgroups( ...
-%       figBase,part,mdl,dat,bas,prd,scenarios, ...
-%       q_unit,t_unit,dt_str,n_m,id_model,colors,model_names, ...
-%       id_dat,Qfdc,Bprt,n_char,figW,figH,model_name_fig,samp_word, ...
+%       figBase,mdl,dat,bas,prd,scenarios, ...
+%       q_unit,t_unit,n_m,id_model,colors,model_names, ...
+%       id_dat,Qfdc,Bprt,n_char,figW,figH,model_name_fig, ...
 %       fontsize_legend,region)
 % This helper is used for train/eval methods with separable training and
 % evaluation windows, such as:
@@ -6605,12 +6354,6 @@ function local_plot_timeseries_fourgroups( ...
 
     figW = 0.95*figW;   % was 16
     figH = 0.95*figH;   % was 8
-    
-    allSelected = false;
-    for is = 1:4
-        allSelected = allSelected ...
-            || ~isempty(scenarios{is}.codes);
-    end
     
     useDateAxis = local_use_dates_on_xaxis(prd, ...
         mdl);
@@ -6643,7 +6386,25 @@ function local_plot_timeseries_fourgroups( ...
             continue
         end
             
-        if isfield(S,'basin_idx') ...
+        requestKnown = isstruct(Qfdc) ...
+            && isfield(Qfdc,'req') ...
+            && isstruct(Qfdc.req) ...
+            && isfield(Qfdc.req,S.tag);
+
+        if requestKnown
+            % Qfdc is the final, quality-screened run selection used by the
+            % FDC figures. Use it here too, including an explicitly empty
+            % scenario, so every postprocessor has identical membership.
+            pick = local_pick_qfdc_ids(Qfdc,S.id_global,S.tag);
+            if isempty(pick)
+                continue
+            end
+            qCols = nan(size(pick));
+            for jj = 1:numel(pick)
+                qCols(jj) = find(S.id_global(:) ...
+                    == pick(jj),1,'first');
+            end
+        elseif isfield(S,'basin_idx') ...
                 && ~isempty(S.basin_idx)
 
             pick = S.basin_idx(:).';
@@ -6797,7 +6558,7 @@ function local_plot_timeseries_fourgroups( ...
                             idxPlot = ...
                                 local_fdc_indices_for_basin( ...
                                 Qfdc,dat,kdat,iq,S.tag,mdl, ...
-                                numel(dat{kdat}.y_n));
+                                numel(dat{kdat}.obs.Q.value));
                         end
                     catch
                         idxPlot = [];
@@ -6957,8 +6718,8 @@ function local_plot_basin_fourgroups(axh,datk,qCol,idx,Qmat, ...
     end
     
     idx = idx(:);
-    y = datk.y_n(:);
-    bad = datk.bad(:);
+    y = datk.obs.Q.value(:);
+    bad = datk.obs.Q.bad(:);
     
     if isempty(idx)
         axis(axh,'off');
@@ -7025,7 +6786,7 @@ function local_plot_basin_fourgroups(axh,datk,qCol,idx,Qmat, ...
                 numel(id_model)));
             plot(axh,x_sim,q_sim, ...
                 'linewidth',lw_sim, ...
-                'color',colors(im,:), ...
+                'color',local_model_color(colors,im), ...
                 'handlevisibility','off');
         end
     end
@@ -7154,44 +6915,6 @@ function tf = ...
 
 end
 
-function ttl = local_group_title_fourgroups( ...
-    tag,part,mdl,dt_str,samp_word,kdat)
-%LOCAL_GROUP_TITLE_FOURGROUPS Creates a title for a four-scenario panel group.
-
-    mname = local_part_name(part,mdl);
-    
-    if strcmpi(part,'sage')
-        tprefix = upper(char(mname));
-    else
-        tprefix = 'SITE';
-    end
-    
-    switch lower(tag)
-        case 'tt'
-            ttl = sprintf(['%s %s training basin ' ...
-                '| training %s (dat = %d)'], ...
-                tprefix,dt_str,samp_word,kdat);
-    
-        case 'te'
-            ttl = sprintf(['%s %s training basin ' ...
-                '| evaluation %s (dat = %d)'], ...
-                tprefix,dt_str,samp_word,kdat);
-    
-        case 'et'
-            ttl = sprintf(['%s %s evaluation basin ' ...
-                '| training %s (dat = %d)'], ...
-                tprefix,dt_str,samp_word,kdat);
-    
-        case 'ee'
-            ttl = sprintf(['%s %s evaluation basin ' ...
-                '| evaluation %s (dat = %d)'], ...
-                tprefix,dt_str,samp_word,kdat);
-    
-        otherwise
-            ttl = char(string(tag));
-    end
-end
-
 function [hLeg,lblLeg] = ...
     local_make_fourgroup_legend( ...
     axh,tag,n_m,id_model,colors, ...
@@ -7207,16 +6930,16 @@ function [hLeg,lblLeg] = ...
     hold(axh,'on');
     
     for ii = 1:n_m
-        c = colors(id_model( ...
-            min(ii,numel(id_model))),:);
+        c = local_model_color(colors,id_model( ...
+            min(ii,numel(id_model))));
     
         h = plot(axh,nan,nan,'-', ...
             'color',c, ...
             'linewidth',2.5);
         hLeg(end+1) = h; %#ok
     
-        name_i = local_model_display_name( ...
-            model_names{id_model(min(ii,numel(id_model)))});
+        name_i = local_model_plot_name(model_names, ...
+            id_model(min(ii,numel(id_model))));
     
         lblLeg{end+1} = sprintf('$\\ \\mathrm{%s}$', ...
             local_latex_escape(name_i)); %#ok
@@ -7792,6 +7515,32 @@ function [Qout,NSEout,KGEout,JKGEout] = ...
     end
 end
 
+function c = local_model_color(colors,modelId)
+%LOCAL_MODEL_COLOR Return a color without using a sparse model ID as a row.
+
+    catalogIds = [1:7 11 99];
+    idx = find(catalogIds == double(modelId),1,'first');
+    if isempty(idx) || idx > size(colors,1)-1
+        idx = size(colors,1);
+    end
+    c = colors(idx,:);
+end
+
+function s = local_model_plot_name(model_names,modelId)
+%LOCAL_MODEL_PLOT_NAME Resolve sparse SAGE model IDs for plot labels.
+
+    if ismember(double(modelId),[11 99])
+        s = local_model_display_name(sage_model_name(modelId));
+    elseif iscell(model_names) && modelId >= 1 ...
+            && modelId <= numel(model_names)
+        s = local_model_display_name(model_names{modelId});
+    elseif ~iscell(model_names) && modelId >= 1 ...
+            && modelId <= numel(model_names)
+        s = local_model_display_name(model_names(modelId));
+    else
+        s = local_model_display_name(sage_model_name(modelId));
+    end
+end
 function s = local_model_display_name(nameIn)
 %LOCAL_MODEL_DISPLAY_NAME Return model name for display only
 
@@ -8046,15 +7795,123 @@ function symbol = local_metric_symbol(metricTag)
 %LOCAL_METRIC_SYMBOL Format metric abbreviations consistently for axes.
 
     tag = char(string(metricTag));
-    if contains(lower(tag),'fdc')
-        symbol = 'S_{\mathrm{fdc}}';
-        return
-    end
-    switch upper(strtrim(tag))
-        case {'NSE','KGE','JKGE'}
+    switch lower(strtrim(tag))
+        case 's_fdc'
+            symbol = 'S_{\mathrm{fdc}}';
+        case 's_p'
+            symbol = 'S_p';
+        case 's_logp'
+            symbol = 'S_{\log p}';
+        case {'nse','kge','jkge'}
             symbol = sprintf('\\mathrm{%s}',upper(strtrim(tag)));
         otherwise
             symbol = strrep(tag,'_','\_');
+    end
+end
+
+function [metric,metricTag,description] = ...
+    local_selected_fdc_skill(curr,gaugescen)
+%LOCAL_SELECTED_FDC_SKILL Select the FDC score implied by loss 6.
+% Outside loss 6, S_fdc remains the reporting default. For loss 6, the
+% displayed score follows the selected formulation: 6a/6b/6c map to
+% S_fdc/S_p/S_logp, respectively.
+
+    lossFnc = local_numeric_field(curr,'loss_fnc',NaN);
+    formulation = local_numeric_field(curr,'fdc_formulation',NaN);
+
+    if ~isfinite(lossFnc)
+        lossFnc = local_numeric_field(gaugescen,'loss_fnc',NaN);
+    end
+    if ~isfinite(formulation)
+        formulation = local_numeric_field( ...
+            gaugescen,'fdc_formulation',NaN);
+    end
+
+    if isstruct(gaugescen) && isfield(gaugescen,'loss') ...
+            && isstruct(gaugescen.loss)
+        if ~isfinite(lossFnc)
+            lossFnc = local_numeric_field(gaugescen.loss,'fnc',NaN);
+        end
+        if ~isfinite(formulation) && isfield(gaugescen.loss,'fdc') ...
+                && isstruct(gaugescen.loss.fdc)
+            formulation = local_numeric_field( ...
+                gaugescen.loss.fdc,'formulation',NaN);
+        end
+    end
+
+    if ~isfinite(lossFnc) || round(lossFnc) ~= 6
+        formulation = 1;
+    elseif ~isfinite(formulation) ...
+            || ~ismember(round(formulation),1:3)
+        formulation = 1;
+    else
+        formulation = round(formulation);
+    end
+
+    switch formulation
+        case 2
+            fieldName = 'S_p';
+            metricTag = 'S_p';
+            description = 'Probability-space FDC skill';
+        case 3
+            fieldName = 'S_logp';
+            metricTag = 'S_logp';
+            description = 'Log-quantile FDC skill';
+        otherwise
+            fieldName = 'S_fdc';
+            metricTag = 'S_fdc';
+            description = 'Physical-discharge FDC skill';
+    end
+
+    metric = struct('tt',[],'te',[],'et',[],'ee',[]);
+    if isstruct(curr) ...
+            && isfield(curr,fieldName) ...
+            && isstruct(curr.(fieldName))
+        metric = curr.(fieldName);
+    elseif isstruct(curr) ...
+            && isfield(curr,'S_fdc') ...
+            && isstruct(curr.S_fdc)
+        % Preserve compatibility with older saved results that contain
+        % only S_fdc rather than silently returning empty figures.
+        metric = curr.S_fdc;
+        metricTag = 'S_fdc';
+        description = 'Physical-discharge FDC skill';
+    end
+end
+
+function value = local_numeric_field(S,name,defaultValue)
+%LOCAL_NUMERIC_FIELD Return the first finite numeric value in a field.
+
+    value = defaultValue;
+    if ~isstruct(S) ...
+            || ~isfield(S,name) ...
+            || isempty(S.(name))
+        return
+    end
+    try
+        candidate = double(S.(name));
+        candidate = candidate(isfinite(candidate));
+        if ~isempty(candidate)
+            value = candidate(1);
+        end
+    catch
+    end
+end
+
+function symbol = local_metric_candara_symbol(metricTag)
+%LOCAL_METRIC_CANDARA_SYMBOL TeX-compatible metric label in Candara.
+    tag = lower(strtrim(char(string(metricTag))));
+    switch tag
+        case 's_fdc'
+            symbol = 'S_{fdc}';
+        case 's_p'
+            symbol = 'S_p';
+        case 's_logp'
+            symbol = '{\it S}_{\rm log {\it p}}';
+        case {'nse','kge','jkge'}
+            symbol = upper(tag);
+        otherwise
+            symbol = char(string(metricTag));
     end
 end
 
@@ -8065,23 +7922,20 @@ function symbol = local_metric_median_symbol(metricTag,scenarioTag)
         scenarioTag = '';
     end
 
-    tag = upper(strtrim(char(string(metricTag))));
-    if contains(lower(tag),'fdc')
-        subscript = 'S_{\mathrm{fdc}}';
-        if ~isempty(scenarioTag)
-            subscript = sprintf('%s,\\mathrm{%s}', ...
-                subscript,lower(strtrim(char(string(scenarioTag)))));
-        end
-        symbol = sprintf('\\widehat{T}_{%s}',subscript);
-        return
-    end
+    tag = lower(strtrim(char(string(metricTag))));
     switch tag
-        case 'NSE'
+        case 'nse'
             subscript = '\mathrm{nse}';
-        case 'KGE'
+        case 'kge'
             subscript = '\mathrm{kge}';
-        case 'JKGE'
+        case 'jkge'
             subscript = '\mathrm{jkge}';
+        case 's_fdc'
+            subscript = 'S_{\mathrm{fdc}}';
+        case 's_p'
+            subscript = 'S_p';
+        case 's_logp'
+            subscript = 'S_{\log p}';
         otherwise
             subscript = local_metric_symbol(metricTag);
     end
@@ -8122,6 +7976,7 @@ function s = local_latex_escape(s)
         fig0,part,dt_str,mdl,dat,bas,Qfdc, ...
         model_name_fig,q_unit,figH, ...
         fontsize_legend,samp_word,region)
+    %LOCAL_PLOT_FDC_POSTPROCESSOR Plot retained flow-duration curves.
     
     if isempty(Qfdc) ...
             || ~isstruct(Qfdc)
@@ -8187,8 +8042,9 @@ function s = local_latex_escape(s)
     pTrain = [];
     pEval = [];
     
-    if isfield(Qfdc,'req') ...
-            && isstruct(Qfdc.req)
+    requestKnown = isfield(Qfdc,'req') ...
+        && isstruct(Qfdc.req);
+    if requestKnown
         ipT = [];
         if isfield(Qfdc.req,'tt') ...
                 && ~isempty(Qfdc.req.tt)
@@ -8225,10 +8081,10 @@ function s = local_latex_escape(s)
     end
     
     
-    if isempty(pTrain)
+    if ~requestKnown && isempty(pTrain)
         pTrain = kRet(isTrain);
     end
-    if isempty(pEval)
+    if ~requestKnown && isempty(pEval)
         pEval = kRet(isEval);
     end
     
@@ -8266,7 +8122,7 @@ function local_plot_one_fdc_group_page( ...
     groupName,mdl,dat,bas,Qfdc,kList, ...
     q_unit,figH,fontsize_legend, ...
     samp_word,region)
-%LOCAL_PLOT_ONE_FDC_GROUP_PAGE Plots one page of scenario-specific FDC panels.
+%LOCAL_PLOT_ONE_FDC_GROUP_PAGE Plots one page scenario-specific FDC panels.
 
     if isempty(kList)
         basinRange = '';
@@ -8342,9 +8198,11 @@ function local_plot_one_fdc_group_page( ...
     end
     
     nPanels = 2*nActiveRows;
+    panelAxes = gobjects(1,nPanels);
     
     for is = 1:nPanels
         ax = axes('Position',axPos(is,:));
+        panelAxes(is) = ax;
         hold(ax,'on');
         box(ax,'off');
         grid(ax,'off');
@@ -8354,7 +8212,7 @@ function local_plot_one_fdc_group_page( ...
         showYLabel = mod(is,2) == 1;
         title(ax, ['\textbf{' scNames{is} '}'], ...
             'interpreter','latex', ...
-            'fontsize',13);
+            'fontsize',17);
             
         if ib > numel(kList)
             text(ax,0.5,0.5,'Not available', ...
@@ -8363,7 +8221,7 @@ function local_plot_one_fdc_group_page( ...
                 'VerticalAlignment','middle', ...
                 'fontsize',13);
             local_style_fdc_axes(ax,q_unit,showXLabel,showYLabel);
-            ax.Title.FontSize = 15;
+            ax.Title.FontSize = 17;
             continue
         end
     
@@ -8403,7 +8261,7 @@ function local_plot_one_fdc_group_page( ...
                 'XMinorTick','off');
             xlabel(ax,'');
         end
-        ax.Title.FontSize = 15;
+        ax.Title.FontSize = 17;
     
         us = local_fdc_usgs_string(dat,bas,k,region);
         ztxt = local_zone_label_short(bas,k);
@@ -8448,15 +8306,31 @@ function local_plot_one_fdc_group_page( ...
         end
     end
     
+    % Match discharge limits and tick locations across both periods of
+    % each basin. Only the left panel displays the shared tick labels.
+    for row = 1:nActiveRows
+        axLeft = panelAxes(2*row-1);
+        axRight = panelAxes(2*row);
+        limits = [ylim(axLeft); ylim(axRight)];
+        sharedLimits = [min(limits(:,1)) max(limits(:,2))];
+        [ticks,tickLabels] = local_fdc_major_xticks( ...
+            sharedLimits(1),sharedLimits(2));
+        set([axLeft axRight],'YLim',sharedLimits,'YTick',ticks);
+        set(axLeft,'YTickLabel',tickLabels);
+        set(axRight,'YTickLabel',[]);
+        local_draw_top_right_box_no_legend(axLeft);
+        local_draw_top_right_box_no_legend(axRight);
+    end
+
     part_name = local_part_name(part,mdl);
     part_name_tex = strrep(part_name,'_','\_');
     
-    annotation(gcf,'textbox',[0 0.96 1 0.03], ...
+    annotation(gcf,'textbox',[0 0.955 1 0.04], ...
         'String',sprintf(['\\texttt{%s}: ' ...
         '%s Flow Duration Curve'], ...
         part_name_tex,dt_str), ...
         'interpreter','latex', ...
-        'fontsize',18, ...
+        'fontsize',20, ...
         'HorizontalAlignment','center', ...
         'VerticalAlignment','middle', ...
         'EdgeColor','none');
@@ -8528,7 +8402,7 @@ function [yObs,qSim,ok] = local_get_fdc_series( ...
                     qFull = A(:,iq,2);
                 else
                     qFull = A(:,iq);
-                    yFull = dat{k}.y_n(:);
+                    yFull = dat{k}.obs.Q.value(:);
                 end
             end
     
@@ -8536,7 +8410,7 @@ function [yObs,qSim,ok] = local_get_fdc_series( ...
                 && ~isempty(Qfdc.q)
             A = Qfdc.q;
             qFull = A(:,iq);
-            yFull = dat{k}.y_n(:);
+            yFull = dat{k}.obs.Q.value(:);
         else
             return
         end
@@ -8561,9 +8435,8 @@ function [yObs,qSim,ok] = local_get_fdc_series( ...
     idx = idx(idx >= 1 ...
         & idx <= n);
     
-    if isfield(dat{k},'bad') ...
-            && ~isempty(dat{k}.bad)
-        badk = dat{k}.bad(:);
+    if ~isempty(dat{k}.obs.Q.bad)
+        badk = dat{k}.obs.Q.bad(:);
         if numel(badk) >= max(idx)
             idx = idx(~badk(idx));
         end
@@ -8690,12 +8563,12 @@ function local_plot_fdc_pair(ax,yObs,qSim,cObs,cSim)
     [yS,pY] = local_fdc_curve(yObs);
     [qS,pQ] = local_fdc_curve(qSim);
 
-    setappdata(ax,'SAGE_fdc_xobs',yS);
-    setappdata(ax,'SAGE_fdc_xsim',qS);
+    setappdata(ax,'SAGE_fdc_qobs',yS);
+    setappdata(ax,'SAGE_fdc_qsim',qS);
     setappdata(ax,'SAGE_fdc_psim',pQ);
 
     if ~isempty(yS)
-        plot(ax,yS,pY,'o', ...
+        plot(ax,pY,yS,'o', ...
             'color',cObs, ...
             'MarkerFaceColor','w', ...
             'MarkerEdgeColor',cObs, ...
@@ -8706,7 +8579,7 @@ function local_plot_fdc_pair(ax,yObs,qSim,cObs,cSim)
     end
 
     if ~isempty(qS)
-        plot(ax,qS,pQ,'-', ...
+        plot(ax,pQ,qS,'-', ...
             'color',cSim, ...
             'linewidth',1.8, ...
             'handlevisibility','off');
@@ -8749,15 +8622,15 @@ end
 function local_style_fdc_axes(ax,q_unit,showXLabel,showYLabel)
 %LOCAL_STYLE_FDC_AXES Applies common flow-duration-curve axis styling.
 
-    set(ax,'XScale','log', ...
-        'YScale','linear', ...
+    set(ax,'XScale','linear', ...
+        'YScale','log', ...
         'TickDir','out', ...
         'TickLength',[0.02 0.02], ...
         'fontname','Times', ...
         'fontsize',15, ...       % tick-label font size
         'linewidth',1, ...
-        'XMinorTick','on', ...
-        'YMinorTick','off');
+        'XMinorTick','off', ...
+        'YMinorTick','on');
     
     axis(ax,'square');
     
@@ -8772,9 +8645,9 @@ function local_style_fdc_axes(ax,q_unit,showXLabel,showYLabel)
     
     if showXLabel
         hX = xlabel(ax, ...
-            ['Discharge (' q_unit ')'], ...
+            'Exceedance probability', ...
             'interpreter','latex', ...
-            'fontsize',14);
+            'fontsize',16);
         hX.Units = 'normalized';
         posX = hX.Position;
         posX(1) = 0.5;
@@ -8786,9 +8659,9 @@ function local_style_fdc_axes(ax,q_unit,showXLabel,showYLabel)
     
     if showYLabel
         hY = ylabel(ax, ...
-            'Exceedance probability', ...
+            ['Discharge (' q_unit ')'], ...
             'interpreter','latex', ...
-                'fontsize',14);
+                'fontsize',16);
         hY.Units = 'normalized';
         posY = hY.Position;
         posY(1) = posY(1)-0.025;
@@ -8798,66 +8671,69 @@ function local_style_fdc_axes(ax,q_unit,showXLabel,showYLabel)
         set(ax,'YTickLabel',[]);
     end
     
-    ylim(ax,[-0.02 1.02]);
+    xlim(ax,[-0.02 1.02]);
     
-    % Smart x-limits:
+    % Smart discharge limits:
     % observed curve keeps its full low-flow range;
     % simulated curve may trim the flat tail near p = 1.
-    xObs = [];
-    xSim = [];
+    qObs = [];
+    qSim = [];
     pSim = [];
 
     try
-        if isappdata(ax,'SAGE_fdc_xobs')
-            xObs = getappdata(ax,'SAGE_fdc_xobs');
+        if isappdata(ax,'SAGE_fdc_qobs')
+            qObs = getappdata(ax,'SAGE_fdc_qobs');
         end
-        if isappdata(ax,'SAGE_fdc_xsim')
-            xSim = getappdata(ax,'SAGE_fdc_xsim');
+        if isappdata(ax,'SAGE_fdc_qsim')
+            qSim = getappdata(ax,'SAGE_fdc_qsim');
         end
         if isappdata(ax,'SAGE_fdc_psim')
             pSim = getappdata(ax,'SAGE_fdc_psim');
         end
     catch
-        xObs = [];
-        xSim = [];
+        qObs = [];
+        qSim = [];
         pSim = [];
     end
 
     % Fallback for older plots.
-    if isempty(xObs) ...
-            && isempty(xSim)
-        xraw = [];
+    if isempty(qObs) ...
+            && isempty(qSim)
+        qraw = [];
         h = findobj(ax,'Type','line');
         for i = 1:numel(h)
-            x = h(i).XData(:);
-            xraw = [xraw; x(:)]; %#ok<AGROW>
+            q = h(i).YData(:);
+            qraw = [qraw; q(:)]; %#ok<AGROW>
         end
-        xraw = double(xraw(:));
-        xraw = xraw(isfinite(xraw) ...
-            & xraw > 0);
-        xObs = xraw;
-        xSim = [];
+        qraw = double(qraw(:));
+        qraw = qraw(isfinite(qraw) ...
+            & qraw > 0);
+        qObs = qraw;
+        qSim = [];
         pSim = [];
     end
 
-    if ~isempty(xObs) ...
-            || ~isempty(xSim)
+    if ~isempty(qObs) ...
+            || ~isempty(qSim)
 
-        [xmin,xmax] = local_fdc_smart_xlimits( ...
-            xObs,xSim,pSim,true);
+        [qmin,qmax] = local_fdc_smart_xlimits( ...
+            qObs,qSim,pSim,true);
 
-        xlim(ax,[xmin xmax]);
+        ylim(ax,[qmin qmax]);
 
-        [xt,xtlbl] = ...
-            local_fdc_major_xticks(xmin,xmax);
+        [qt,qtlbl] = ...
+            local_fdc_major_xticks(qmin,qmax);
 
         set(ax, ...
-            'XTickMode','manual', ...
-            'XTick',xt, ...
-            'XTickLabelMode','manual', ...
-            'XTickLabel',xtlbl, ...
-            'XTickLabelRotation',0, ...
+            'YTickMode','manual', ...
+            'YTick',qt, ...
+            'YTickLabelMode','manual', ...
+            'YTickLabel',qtlbl, ...
             'TickLabelInterpreter','latex');
+
+        if ~showYLabel
+            set(ax,'YTickLabel',[]);
+        end
 
         try
             ax.XRuler.TickLabelGapOffset = -2;
@@ -9012,21 +8888,26 @@ end
 function local_draw_top_right_box_no_legend(ax)
 %LOCAL_DRAW_TOP_RIGHT_BOX_NO_LEGEND Completes an axes frame without adding legend objects.
 
+    if isappdata(ax,'SAGE_fdc_frame_lines')
+        oldLines = getappdata(ax,'SAGE_fdc_frame_lines');
+        delete(oldLines(isgraphics(oldLines)));
+    end
     xl = xlim(ax);
     yl = ylim(ax);
     lw = ax.LineWidth;
     
-    line(ax,[xl(1) xl(2)],[yl(2) yl(2)], ...
+    topLine = line(ax,[xl(1) xl(2)],[yl(2) yl(2)], ...
         'color','k', ...
         'linewidth',lw, ...
         'clipping','off', ...
         'handlevisibility','off');
     
-    line(ax,[xl(2) xl(2)],[yl(1) yl(2)], ...
+    rightLine = line(ax,[xl(2) xl(2)],[yl(1) yl(2)], ...
         'color','k', ...
         'linewidth',lw, ...
         'clipping','off', ...
         'handlevisibility','off');
+    setappdata(ax,'SAGE_fdc_frame_lines',[topLine rightLine]);
 end
 
 function us = local_fdc_usgs_string(dat,bas,k,region)
@@ -9160,19 +9041,6 @@ function s = local_capfirst(s)
     s = [upper(s(1)) s(2:end)];
 end
 
-function s = local_latex_escape_title(s)
-%LOCAL_LATEX_ESCAPE_TITLE Escapes a title for MATLAB's LaTeX interpreter.
-
-    s = char(string(s));
-    s = strrep(s,'\','\textbackslash{}');
-    s = strrep(s,'_','\_');
-    s = strrep(s,'%','\%');
-    s = strrep(s,'&','\&');
-    s = strrep(s,'#','\#');
-
-end
-
-
 % ----------------------------------------------------------------
 function varargout = local_region_helpers_plot(op,region,varargin)
 % ----------------------------------------------------------------
@@ -9246,8 +9114,8 @@ function s = local_basin_code(u,region)
     end
 
     % CAMELS-DE: add/preserve DE prefix
-    if any(strcmp(reg,{'CAMELS_DE', ...
-        'DE','GERMANY'}))
+    if any(strcmp(reg,{'CAMELS_DE','CAMELS_DEH', ...
+        'DE','DEH','GERMANY'}))
     
         s = upper(strtrim(s));
         s = regexprep(s,'^DE','');
@@ -9343,13 +9211,13 @@ function ytxt = local_scenario_ylabel(is,~)
 
     switch is
         case 1
-            ytxt = '$\mathrm{tt}$';
+            ytxt = 'train bas | train prd';
         case 2
-            ytxt = '$\mathrm{te}$';
+            ytxt = 'train bas | eval prd';
         case 3
-            ytxt = '$\mathrm{et}$';
+            ytxt = 'eval bas | train prd';
         case 4
-            ytxt = '$\mathrm{ee}$';
+            ytxt = 'eval bas | eval prd';
     end
 
 end
@@ -9458,8 +9326,12 @@ function [latLim,lonLim] = local_parameter_map_limits(latlon,region)
         return
     end
     
-    padLat = 0.04 * range(lat);
-    padLon = 0.04 * range(lon);
+    % MAPPING TOOLBOX
+    % padLat = 0.04 * range(lat);
+    % padLon = 0.04 * range(lon);
+    % Base-MATLAB equivalent of range; avoids Statistics Toolbox dependency
+    padLat = 0.04 * (max(lat) - min(lat));
+    padLon = 0.04 * (max(lon) - min(lon));
     
     if padLat == 0
         padLat = 0.5;

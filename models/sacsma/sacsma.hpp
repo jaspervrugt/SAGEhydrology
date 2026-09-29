@@ -53,6 +53,10 @@ struct OutputView {
     double* q = nullptr;
     double* J = nullptr;
     std::size_t zrows = 0, zcols = 0, nq = 0, nj = 0;
+    double* swe = nullptr;
+    double* Jswe = nullptr;
+    double* sm = nullptr;
+    double* Jsm = nullptr;
 };
 
 bool run_into(int ns,

@@ -149,7 +149,8 @@ inline void delta_n(int L,
                     int n,
                     std::vector<double>& delta,
                     const double* sigma_scalar = nullptr,
-                    const double* sigma_diag = nullptr)
+                    const double* sigma_diag = nullptr,
+                    int fdc_formulation = 1)
 {
     delta.assign((size_t)n, 0.0);
 
@@ -278,7 +279,38 @@ inline void delta_n(int L,
         }
     } break;
 
-    case 6: { // FDC pairwise O(n^2) -- WARNING for large n
+    case 6: { // 6a d_fdc, 6b d_p, or 6c d_logp
+        if (fdc_formulation == 2 || fdc_formulation == 3) {
+            std::vector<int> order((size_t)n);
+            for (int i = 0; i < n; ++i) order[(size_t)i] = i;
+            std::stable_sort(order.begin(), order.end(),
+                             [&](int a, int b) { return q[a] < q[b]; });
+            std::vector<double> ys((size_t)n);
+            for (int i = 0; i < n; ++i) ys[(size_t)i] = y[i];
+            std::sort(ys.begin(), ys.end());
+            double q0 = std::numeric_limits<double>::quiet_NaN();
+            if (fdc_formulation == 3) {
+                std::vector<double> positive;
+                for (double value : ys) {
+                    if (value > 0.0) positive.push_back(value);
+                }
+                if (!positive.empty()) q0 = 0.01 * median_copy(positive);
+            }
+            for (int i = 0; i < n; ++i) {
+                const int k = order[(size_t)i];
+                const double qs = q[k];
+                if (fdc_formulation == 2) {
+                    delta[(size_t)k] = 2.0 * (qs - ys[(size_t)i]) / (double)n;
+                } else if (std::isfinite(q0) && q0 > 0.0 && qs + q0 > 0.0) {
+                    delta[(size_t)k] =
+                        2.0 * (std::log(qs + q0) - std::log(ys[(size_t)i] + q0)) /
+                        ((double)n * (qs + q0));
+                } else {
+                    delta[(size_t)k] = std::numeric_limits<double>::quiet_NaN();
+                }
+            }
+            break;
+        }
         const double invn2 = 1.0 / ((double)n * (double)n);
         for (int i = 0; i < n; ++i) {
             double t1 = 0.0, t2 = 0.0;

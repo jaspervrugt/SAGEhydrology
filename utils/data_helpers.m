@@ -9,6 +9,8 @@ function out = data_helpers(action,varargin)
 %   out = data_helpers('download',cfg,'daily',ui);
 %   out = data_helpers('download',cfg,'hourly',ui);
 %   out = data_helpers('download',cfg,'15min',ui);
+%   files = data_helpers('requiredfiles',region);
+%   ok = data_helpers('install',region,source,target);
 %   out = data_helpers('mapstatus',cfg);
 %   out = data_helpers('ensuremap',cfg,ui);
 %
@@ -57,6 +59,12 @@ function out = data_helpers(action,varargin)
                 'hasattributes'}
             out = local_has_metadata( ...
                 varargin{:});
+
+        case 'requiredfiles'
+            out = local_region_required_files(varargin{:});
+
+        case 'install'
+            out = local_install_region(varargin{:});
     
         case 'download'
             out = local_download( ...
@@ -72,8 +80,7 @@ function out = data_helpers(action,varargin)
     
         case 'streamdir'
             out = local_stream_dir( ...
-                varargin{:});
-    
+                varargin{:});    
 
         case 'ensuremap'
             out = local_ensure_natural_earth_map( ...
@@ -90,6 +97,523 @@ function out = data_helpers(action,varargin)
     end
 end
 
+
+% ===============================================================
+% Consolidated region installers (private to the data-helper API)
+% ===============================================================
+function files = local_region_required_files(region)
+    region = local_region_code(region);
+    switch region
+        case 'CAMELS_KR'
+            files = local_kr_install('metadata');
+        case 'HYDRO_CIS'
+            files = local_ru_install('metadata');
+        otherwise
+            error('data_helpers:NoRegionInstaller', ...
+                'No staged installer is registered for %s.',region);
+    end
+end
+
+function ok = local_install_region(region,source,target)
+    region = local_region_code(region);
+    switch region
+        case 'CAMELS_KR'
+            ok = local_kr_install('install',source,target);
+        case 'HYDRO_CIS'
+            ok = local_ru_install('install',source,target);
+        otherwise
+            error('data_helpers:NoRegionInstaller', ...
+                'No staged installer is registered for %s.',region);
+    end
+end
+
+function out = local_kr_install(action,varargin)
+%LOCAL_KR_INSTALL Validate/install the observed daily v1.1 inventory.
+    files={'CAMELS_KR_location_attributes.csv', ...
+        'CAMELS_KR_topography_attributes.csv', ...
+        'CAMELS_KR_climate_attributes.csv', ...
+        'CAMELS_KR_soil_attributes.csv', ...
+        'CAMELS_KR_land cover_attributes.csv', ...
+        'CAMELS_KR_human influence_attributes.csv', ...
+        'CAMELS_KR_hydrology_attributes.csv'};
+    if strcmp(action,'metadata')
+        out = files; 
+        return; 
+    end
+    here = fullfile(fileparts(fileparts(mfilename('fullpath'))), ...
+        'regions','KR','KR');
+    ids = strip(readlines(fullfile(here,'KR_282_basins.txt')));
+    ids = ids(strlength(ids)>0);
+    assert(numel(ids) == 282 ...
+        && numel(unique(ids)) == 282, ...
+        'CAMELS_KR:Inventory', ...
+        'Expected 282 unique CAMELS-KR gauge IDs.');
+    if strcmp(action,'install')
+        source = varargin{1}; 
+        target = varargin{2};
+        assert(local_kr_complete(source,true,ids,files), ...
+            'CAMELS_KR:SourceIncomplete', ...
+            ['CAMELS-KR source archive is incomplete ' ...
+            'or has different gauge IDs.']);
+        if ~isfolder(target)
+            mkdir(target); 
+        end
+        for i=1:numel(files)
+            copyfile(fullfile(source,files{i}),target); 
+        end
+        for kind={'forcing','discharge'}
+            [folder,pattern] = local_kr_series_path(source,kind{1},true);
+            destination = fullfile(target,'daily',kind{1});
+            if ~isfolder(destination)
+                mkdir(destination); 
+            end
+            for i=1:numel(ids)
+                copyfile(fullfile(folder, ...
+                    sprintf(pattern,ids(i))),destination);
+            end
+        end
+        out = local_kr_complete(target,false,ids,files);
+        assert(out,'CAMELS_KR:InstallIncomplete', ...
+            'CAMELS-KR install is incomplete.');
+    elseif strcmp(action,'status')
+        out = local_kr_complete(varargin{1},false,ids,files);
+    else
+        error('CAMELS_KR:BadAction', ...
+            'Unknown installation action: %s',action);
+    end
+end
+
+function ok = local_kr_complete(root,native,ids,files)
+    ok = false;
+    for i = 1:numel(files)
+        f = fullfile(root,files{i}); d = dir(f);
+        if isempty(d) ...
+                || d.bytes == 0 
+            return; 
+        end
+    end
+    try
+        T = readtable(fullfile(root,files{1}), ...
+            'TextType','string');
+        if height(T)~=282 ...
+                || ~isequal(sort(string(T.gauge_id)),sort(ids))
+            return; 
+        end
+        if any(~isfinite(T.basin_area) ...
+                | T.basin_area<=0)
+            return; 
+        end
+    catch
+        return
+    end
+    for kind={'forcing','discharge'}
+        [folder,pattern] = local_kr_series_path(root,kind{1},native);
+        for i=1:numel(ids)
+            d = dir(fullfile(folder,sprintf(pattern,ids(i))));
+            if isempty(d) ...
+                    || d.bytes == 0 
+                return; 
+            end
+        end
+    end
+    ok=true;
+end
+
+function [folder,pattern] = local_kr_series_path(root,kind,native)
+    if strcmp(kind,'forcing')
+        name = 'Meteorological';
+    else
+        name = 'Hydrological';
+    end
+    pattern=['CAMELS_KR_' name '_timeseries_%s.csv'];
+    if native
+        folder = fullfile(root,[name ' time series']);
+    else
+        folder=fullfile(root,'daily',kind); 
+    end
+end
+
+function [out,varargout] = local_ru_install(action,varargin)
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%LOCAL_RU_INSTALL Validate or install HydroCIS v1.3 for Russia.
+%
+% SYNOPSIS:
+% Private implementation used by data_helpers status/download/install.
+%
+% INPUT:
+%   action      'metadata', 'status', or 'install'
+%   source      Extracted Russia_HydroMeteo_Database_v04 archive
+%   target      SAGE Data/HYDRO_CIS directory
+%
+% OUTPUT:
+%   files       Required metadata files for a complete installation
+%   tf          Logical installation status
+%
+% DESCRIPTION:
+%   The official v1.3 archive combines the Russian database with 278 GRDC
+%   gauges elsewhere in the Commonwealth of Independent States. SAGE's
+%   Russia region uses the 1,886 Russian gauges and leaves the 278 added
+%   GRDC gauges outside Russia out of this regional configuration. Gauge
+%   identifiers link the consolidated NetCDF records, attributes, and
+%   geometries; SAGE subsequently applies its data-availability screening.
+%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% © Written by Jasper A. Vrugt, Sept. 2026                              %
+% University of California, Irvine                                        %
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+    required = {'static_data.csv','climate_attributes.csv', ...
+        'gauge_information.txt', ...
+        fullfile('geometry','russia_gauges.gpkg'), ...
+        fullfile('geometry','russia_ws.gpkg')};
+
+    action = lower(strtrim(char(string(action))));
+    if strcmp(action,'metadata')
+        out = required;
+        return
+    end
+
+    if strcmp(action,'status')
+        [out,reason] = local_ru_complete(varargin{1},required);
+        if nargout > 1
+            varargout{1} = reason;
+        end
+        return
+    end
+
+    if ~strcmp(action,'install')
+        error('HYDRO_CIS:BadAction', ...
+            'Unknown HydroCIS installation action: %s.',action);
+    end
+
+    source = char(string(varargin{1}));
+    target = char(string(varargin{2}));
+    assert(isfolder(source),'HYDRO_CIS:MissingSource', ...
+        'The extracted HydroCIS source folder does not exist: %s',source);
+
+    % Published archive names differ from SAGE's standardized installed
+    % names. Locate the official v1.3 payload here and rename only while
+    % copying it into Data/HYDRO_CIS below.
+    staticFile = local_ru_find_file(source,'russia_cis_static.csv');
+    gaugeFile = local_ru_find_file(source,'russia_cis_gauges.gpkg');
+    basinFile = local_ru_find_file(source,'russia_cis_ws.gpkg');
+    netcdfDir = local_ru_find_folder(source,'nc_concat');
+
+    ncFiles = dir(fullfile(netcdfDir,'*.nc'));
+    ncFiles = ncFiles(~[ncFiles.isdir]);
+    assert(~isempty(ncFiles),'HYDRO_CIS:MissingNetCDF', ...
+        'No gauge NetCDF files were found in %s.',netcdfDir);
+    ncIds = strings(numel(ncFiles),1);
+    for i = 1:numel(ncFiles)
+        [~,ncIds(i)] = fileparts(ncFiles(i).name);
+    end
+    ncIds = local_ru_ids(ncIds);
+
+    A = readtable(staticFile,'TextType','string', ...
+        'VariableNamingRule','preserve');
+    idA = local_ru_table_column(A,{'gauge_id','gaugeid','id'});
+    assert(~isempty(idA),'HYDRO_CIS:AttributeGaugeID', ...
+        'static_data.csv does not contain a gauge_id column.');
+    attrIds = local_ru_ids(A.(idA));
+
+    try
+        G = readgeotable(gaugeFile);
+        W = readgeotable(basinFile);
+    catch ME
+        error('HYDRO_CIS:GeometryRead', ...
+            ['HydroCIS installation requires MATLAB readgeotable support ' ...
+            'to read the published GeoPackage files: %s'],ME.message);
+    end
+    idG = local_ru_table_column(G,{'gauge_id','gaugeid','id'});
+    idW = local_ru_table_column(W,{'gauge_id','gaugeid','id'});
+    assert(~isempty(idG) && ~isempty(idW),'HYDRO_CIS:GeometryGaugeID', ...
+        'The HydroCIS GeoPackage files must contain gauge_id.');
+    gaugeIds = local_ru_ids(G.(idG));
+    basinIds = local_ru_ids(W.(idW));
+
+    ids = intersect(ncIds,attrIds,'stable');
+    ids = intersect(ids,gaugeIds,'stable');
+    ids = intersect(ids,basinIds,'stable');
+    ids = local_ru_russian_ids(ids,G,gaugeIds);
+    [~,order] = sort(str2double(ids));
+    ids = ids(order);
+    assert(numel(ids) == 1886 && numel(unique(ids)) == 1886, ...
+        'HYDRO_CIS:RussianInventory', ...
+        ['Expected 1,886 unique Russian gauges after joining the official ' ...
+        'time-series, attribute, and geometry inventories; found %d.'], ...
+        numel(ids));
+    inventoryFile = local_ru_inventory_file();
+    assert(isfile(inventoryFile),'HYDRO_CIS:MissingInventory', ...
+        'The packaged Russian basin inventory is missing: %s', ...
+        inventoryFile);
+    inventoryIds = local_ru_ids(readlines(inventoryFile));
+    inventoryIds = inventoryIds(strlength(inventoryIds) > 0);
+    assert(numel(inventoryIds) == 1886 ...
+            && numel(unique(inventoryIds)) == 1886 ...
+            && isempty(setxor(ids,inventoryIds)), ...
+        'HYDRO_CIS:InventoryMismatch', ...
+        ['The packaged Russian basin inventory does not match the 1,886 ' ...
+        'gauges joined from the official HydroCIS products.']);
+
+    idxG = local_ru_match(ids,gaugeIds);
+    idxW = local_ru_match(ids,basinIds);
+    [lat,lon] = local_ru_coordinates(G,idxG);
+    area = local_ru_area(W,idxW);
+    nameEn = local_ru_text(G,idxG,{'name_en','name','station_name'});
+    nameRu = local_ru_text(G,idxG,{'name_ru'});
+    nameEn = hydro_cis_english_names(nameEn);
+    assert(all(isfinite(lat)) && all(isfinite(lon)), ...
+        'HYDRO_CIS:Coordinates', ...
+        'Every Russian gauge must have finite latitude and longitude.');
+    assert(all(isfinite(area) & area > 0),'HYDRO_CIS:Area', ...
+        'Every Russian gauge must have a positive catchment area.');
+
+    if ~isfolder(target), mkdir(target); end
+    geometryTarget = fullfile(target,'geometry');
+    seriesTarget = fullfile(target,'daily','timeseries');
+    if ~isfolder(geometryTarget), mkdir(geometryTarget); end
+    if ~isfolder(seriesTarget), mkdir(seriesTarget); end
+
+    copyfile(staticFile,fullfile(target,'static_data.csv'),'f');
+    copyfile(gaugeFile,fullfile(geometryTarget,'russia_gauges.gpkg'),'f');
+    copyfile(basinFile,fullfile(geometryTarget,'russia_ws.gpkg'),'f');
+
+    gaugeElev = nan(size(lat));
+    heightName = local_ru_table_column(A,{'height_bs'});
+    if ~isempty(heightName)
+        idxA = local_ru_match(ids,attrIds);
+        gaugeElev = double(A.(heightName)(idxA));
+    end
+    M = table(ids,nameEn,nameRu,lat,lon,gaugeElev,area, ...
+        'VariableNames',{'gauge_id','gauge_name','gauge_name_ru', ...
+        'gauge_lat','gauge_lon','gauge_elev','area_km2'});
+    writetable(M,fullfile(target,'gauge_information.txt'), ...
+        'Delimiter','\t','FileType','text','Encoding','UTF-8');
+
+    [found,ncIndex] = ismember(ids,ncIds);
+    assert(all(found),'HYDRO_CIS:NetCDFInventory', ...
+        'At least one selected Russian gauge has no NetCDF file.');
+    for i = 1:numel(ids)
+        sourceFile = fullfile(ncFiles(ncIndex(i)).folder, ...
+            ncFiles(ncIndex(i)).name);
+        copyfile(sourceFile,fullfile(seriesTarget,[char(ids(i)) '.nc']),'f');
+    end
+    hydro_cis_climate_attributes(seriesTarget,ids, ...
+        fullfile(target,'climate_attributes.csv'),lat);
+
+    % Dropbox/OneDrive-backed folders can expose newly copied files to a
+    % directory listing with a short delay. Retry the read-only validation
+    % before declaring an otherwise complete installation unsuccessful.
+    out = false;
+    reason = '';
+    for iCheck = 1:10
+        [out,reason] = local_ru_complete(target,required);
+        if out, break; end
+        pause(0.5);
+    end
+    assert(out,'HYDRO_CIS:InstallIncomplete', ...
+        ['The HydroCIS Russia installation ' ...
+        'did not pass final validation. ' ...
+        'Last check: %s'],reason);
+end
+
+function [tf,reason] = local_ru_complete(root,required)
+    tf = false;
+    if ~isfolder(root)
+        reason = ['Missing installation folder: ' root];
+        return
+    end
+    for i = 1:numel(required)
+        q = dir(fullfile(root,required{i}));
+        if isempty(q) ...
+                || q(1).bytes == 0
+            reason = ['Missing or empty ' ...
+                'required file: ' required{i}];
+            return
+        end
+    end
+    listFile = local_ru_inventory_file();
+    try
+        ids = local_ru_ids(readlines(listFile));
+        ids = ids(strlength(ids) > 0);
+        if numel(ids) ~= 1886 ...
+                || numel(unique(ids)) ~= 1886
+            reason = sprintf(['Basin inventory has ' ...
+                '%d rows and %d unique IDs.'], ...
+                numel(ids),numel(unique(ids)));
+            return
+        end
+        M = readtable(fullfile(root,'gauge_information.txt'), ...
+            'TextType','string','Delimiter','\t');
+        if height(M) ~= 1886 ...
+                || ~all(ismember(ids,local_ru_ids(M.gauge_id)))
+            reason = sprintf(['Gauge information ' ...
+                'has %d rows or does not ' ...
+                'contain every basin ID.'],height(M));
+            return
+        end
+        if any(~isfinite(M.gauge_lat) ...
+                | ~isfinite(M.gauge_lon) ...
+                | ~isfinite(M.area_km2) ...
+                | M.area_km2 <= 0)
+            reason = ['Gauge information contains ' ...
+                'nonfinite coordinates or ' ...
+                'nonpositive catchment areas.'];
+            return
+        end
+        D = dir(fullfile(root,'daily','timeseries','*.nc'));
+        D = D(~[D.isdir]);
+        if numel(D) < 1886
+            reason = sprintf(['Found %d of 1,886 ' ...
+                'required NetCDF files.'], ...
+                numel(D));
+            return
+        end
+        names = strings(numel(D),1);
+        for i = 1:numel(D)
+            [~,names(i)] = fileparts(D(i).name); 
+        end
+        if ~all(ismember(ids,local_ru_ids(names)))
+            reason = ['At least one basin ID ' ...
+                'has no matching NetCDF file.'];
+            return
+        end
+    catch ME
+        reason = ME.message;
+        return
+    end
+    tf = true;
+    reason = 'Complete.';
+end
+
+function file = local_ru_inventory_file()
+    file = fullfile(fileparts(fileparts(mfilename('fullpath'))), ...
+        'regions','RU','RU_1886_basins.txt');
+end
+
+function file = local_ru_find_file(root,name)
+    D = dir(fullfile(root,'**',name));
+    D = D(~[D.isdir]);
+    assert(isscalar(D),'HYDRO_CIS:ArchiveLayout', ...
+        ['Expected exactly one %s in ' ...
+        'the extracted archive; found %d.'], ...
+        name,numel(D));
+    file = fullfile(D(1).folder,D(1).name);
+end
+
+function folder = local_ru_find_folder(root,name)
+    % With MATLAB's recursive wildcard, a path ending in a directory name
+    % returns that directory's contents rather than the directory entry.
+    % Locate its NetCDF payload and recover the unique parent folder.
+    D = dir(fullfile(root,'**',name,'*.nc'));
+    D = D(~[D.isdir]);
+    isMacMetadata = startsWith(string({D.name}),'._') ...
+        | contains(string({D.folder}), ...
+        [filesep '__MACOSX' filesep]);
+    D = D(~isMacMetadata);
+    folders = unique(string({D.folder}),'stable');
+    assert(isscalar(folders),'HYDRO_CIS:ArchiveLayout', ...
+        ['Expected exactly one %s ' ...
+        'folder in the archive; found %d.'], ...
+        name,numel(folders));
+    folder = char(folders(1));
+end
+
+function name = local_ru_table_column(T,candidates)
+    names = string(T.Properties.VariableNames);
+    name = '';
+    for i = 1:numel(candidates)
+        hit = find(strcmpi(names,candidates{i}),1);
+        if ~isempty(hit)
+            name = char(names(hit)); 
+            return; 
+        end
+    end
+end
+
+function ids = local_ru_ids(x)
+    ids = strip(string(x(:)));
+    isZero = matches(ids,'^0+(\.0+)?$');
+    ids = regexprep(ids,'\.0+$','');
+    ids = regexprep(ids,'^0+','');
+    ids(isZero) = "0";
+end
+
+function ids = local_ru_russian_ids(ids,G,gaugeIds)
+    countryName = local_ru_table_column(G, ...
+        {'country','country_code', ...
+        'country_iso','iso3','country_name'});
+    if ~isempty(countryName)
+        country = upper(strip(string(G.(countryName))));
+        isRussia = ismember(country, ...
+            ["RU","RUS","RUSSIA","RUSSIAN FEDERATION"]);
+        ids = intersect(ids,gaugeIds(isRussia),'stable');
+    elseif numel(ids) ~= 1886
+        % Russian AIS identifiers have at most five digits; the added CIS
+        % records use seven-digit GRDC station identifiers.
+        isRussian = isfinite(str2double(ids)) ...
+            & strlength(ids) <= 5;
+        ids = ids(isRussian);
+    end
+end
+
+function idx = local_ru_match(ids,sourceIds)
+    [found,idx] = ismember(ids,sourceIds);
+    assert(all(found),'HYDRO_CIS:Join', ...
+        ['A selected gauge could not ' ...
+        'be joined to published metadata.']);
+end
+
+function [lat,lon] = local_ru_coordinates(G,idx)
+    latName = local_ru_table_column(G, ...
+        {'gauge_lat','latitude','lat'});
+    lonName = local_ru_table_column(G, ...
+        {'gauge_lon','longitude','lon'});
+    if ~isempty(latName) ...
+            && ~isempty(lonName)
+        lat = double(G.(latName)(idx));
+        lon = double(G.(lonName)(idx));
+        return
+    end
+    shapeName = local_ru_table_column(G,{'Shape'});
+    assert(~isempty(shapeName),'HYDRO_CIS:GaugeGeometry', ...
+        'The gauge GeoPackage has no point geometry.');
+    shape = G.(shapeName)(idx);
+    try
+        lat = double(shape.Latitude(:));
+        lon = double(shape.Longitude(:));
+    catch
+        try
+            lat = double(shape.Y(:));
+            lon = double(shape.X(:));
+        catch
+            error('HYDRO_CIS:GaugeGeometry', ...
+                ['Could not extract gauge ' ...
+                'coordinates from the GeoPackage.']);
+        end
+    end
+end
+
+function area = local_ru_area(W,idx)
+    name = local_ru_table_column(W, ...
+        {'new_area','ws_area', ...
+        'basin_area','area_km2','area'});
+    assert(~isempty(name),'HYDRO_CIS:CatchmentArea', ...
+        ['The catchment GeoPackage ' ...
+        'has no recognized area field.']);
+    area = double(W.(name)(idx));
+end
+
+function value = local_ru_text(T,idx,candidates)
+    name = local_ru_table_column(T,candidates);
+    if isempty(name)
+        value = repmat("",numel(idx),1);
+    else
+        value = string(T.(name)(idx));
+    end
+end
+
+
 % =====================
 % Public action helpers
 % =====================
@@ -100,12 +624,13 @@ function tf = local_supports(region,stream)
     switch region
         case {'CAMELS_AT', ...
                 'CAMELS_US', ...
-                'CAMELS_DE', ...
                 'CAMELS_GB', ...
                 'CAMELS_IS'}
             tf = any(strcmp(stream,{'daily','hourly'}));
-        case 'CAMELSH_US'
+        case {'CAMELSH_US','CAMELS_DEH'}
             tf = strcmp(stream,'hourly');
+        case 'CAMELS_DE'
+            tf = strcmp(stream,'daily');
         case 'CAMELS_CZ'
             tf = any(strcmp(stream,{'daily','hourly'}));
         case 'CAMELS_CA'
@@ -122,11 +647,15 @@ function tf = local_supports(region,stream)
                 'CAMELS_FI', ...
                 'CAMELS_IND', ...
                 'CAMELS_IL', ...
+                'CAMELS_ET', ...
                 'CAMELS_JP', ...
                 'MACH_US', ...
                 'CAMELS_MX', ...
+                'CAMELS_KR', ...
                 'CAMELS_PE', ...
                 'CAMELS_PL', ...
+                'EStreams_PT', ...
+                'HYDRO_CIS', ...
                 'CAMELS_SE'}
             tf = strcmp(stream,'daily');
         case 'CAMELS_NZ'
@@ -189,14 +718,16 @@ function ok = local_has_stream(cfg,stream)
 
     switch region
 
-        case 'CAMELS_AU' %1
+        case 'CAMELS_AU' % 1
             dDaily = fullfile(dirD,'daily');
-            ok = isfile(fullfile(dDaily, ...
+            ok = isfile(fullfile(dirD, ...
+                'CAMELS_AUS_v2.03.installed')) ...
+                && isfile(fullfile(dDaily, ...
                 'streamflow','streamflow_mmd.csv')) ...
                 && isfile(fullfile(dDaily, ...
                 'precipitation','precipitation_SILO.csv')) ...
                 && isfile(fullfile(dDaily, ...
-                'precipitation','precipitation_AWAP.csv')) ...
+                'precipitation','precipitation_AGCD.csv')) ...
                 && local_count_files(fullfile(dDaily, ...
                 'evaporative_demand'),{'*.csv'}) >= 8 ...
                 && isfile(fullfile(dDaily, ...
@@ -204,11 +735,11 @@ function ok = local_has_stream(cfg,stream)
                 && isfile(fullfile(dDaily, ...
                 'temperature','tmax_SILO.csv')) ...
                 && isfile(fullfile(dDaily, ...
-                'temperature','tmin_AWAP.csv')) ...
+                'temperature','tmin_AGCD.csv')) ...
                 && isfile(fullfile(dDaily, ...
-                'temperature','tmax_AWAP.csv'));
+                'temperature','tmax_AGCD.csv'));
 
-        case 'CAMELS_AT' %2
+        case 'CAMELS_AT' % 2
             if strcmp(stream,'daily')
                 dF = fullfile(dirD,'daily', ...
                     'timeseries','forcing');
@@ -225,7 +756,7 @@ function ok = local_has_stream(cfg,stream)
                 && local_count_files(dF,{'ID_*.csv'}) >= 859 ...
                 && local_count_files(dQ,{'ID_*.csv'}) >= 859;
 
-        case 'CAMELS_BR' %3
+        case 'CAMELS_BR' % 3
             ok = local_br_component_ok(dirD, ...
                 'precipitation',897) ...
                 && local_br_component_ok(dirD, ...
@@ -233,9 +764,19 @@ function ok = local_has_stream(cfg,stream)
                 && local_br_component_ok(dirD, ...
                 'temperature',897) ...
                 && local_br_component_ok(dirD, ...
-                'streamflow',897);
+                'streamflow',685);
 
-        case 'CAMELS_CA' %4
+        case 'CAMELS_ET' % 4
+            d=fullfile(dirD,'daily','timeseries');
+            ok=strcmp(stream,'daily') && isfolder(d) ...
+                && local_count_files(d,{'CAMELS_ET_*.csv'}) >= 83;
+
+        case 'EStreams_PT' % 5
+            d=fullfile(dirD,'daily','timeseries');
+            ok=strcmp(stream,'daily') && isfolder(d) ...
+                && local_count_files(d,{'EStreams_PT_*.csv'}) >= 280;
+
+        case 'CAMELS_CA' % 6
             nExpected = local_ca_expected_basin_count(dirD);
             if strcmp(stream,'daily')
                 dF = fullfile(dirD,'daily','forcing','daymet');
@@ -264,7 +805,7 @@ function ok = local_has_stream(cfg,stream)
                     && nQ > 0;
             end
 
-        case 'CAMELS_CH' %5
+        case 'CAMELS_CH' % 7
             dObs = fullfile(dirD,'daily','timeseries', ...
                 'observation_based');
             dSim = fullfile(dirD,'daily','timeseries', ...
@@ -277,7 +818,7 @@ function ok = local_has_stream(cfg,stream)
                 && local_count_files(dSim, ...
                 {'CAMELS_CH_sim_based_*.csv'}) > 0;
 
-        case 'CAMELS_CL' %6
+        case 'CAMELS_CL' % 8
             dDaily = fullfile(dirD,'daily');
             ok = isfile(fullfile(dDaily, ...
                 'streamflow','3_CAMELScl_streamflow_mm.txt')) ...
@@ -302,20 +843,20 @@ function ok = local_has_stream(cfg,stream)
                 && isfile(fullfile(dDaily, ...
                 'swe','13_CAMELScl_swe.txt'));
 
-        case 'CAMELS_COL' %7
+        case 'CAMELS_COL' % 9
             d = fullfile(dirD,'daily','timeseries');
             ok = strcmp(stream,'daily') ...
                 && isfolder(d) ...
                 && local_count_files(d, ...
                 {'Hydromet_data_*.txt'}) > 0;
 
-        case 'CAMELS_CZ' %8
+        case 'CAMELS_CZ' % 10
             d = local_cz_timeseries_install_dir(dirD,stream);
             ok = any(strcmp(stream,{'daily','hourly'})) ...
                 && ~isempty(d) ...
                 && local_count_files(d,{'camelscz_*.csv'}) >= 249;
 
-        case 'CAMELS_DE' %9
+        case {'CAMELS_DE','CAMELS_DEH'} % 11
             if strcmp(stream,'daily')
                 d = fullfile(dirD,'daily','timeseries');
                 ok = isfolder(d) ...
@@ -330,21 +871,21 @@ function ok = local_has_stream(cfg,stream)
                 ok = false;
             end
 
-        case 'CAMELS_DK' %10
+        case 'CAMELS_DK' % 12
             d = fullfile(dirD,'daily','timeseries');
             ok = strcmp(stream,'daily') ...
                 && isfolder(d) ...
                 && local_count_files(d, ...
                 {'CAMELS_DK_obs_based_*.csv'}) >= 304;
 
-        case 'CAMELS_ES' %11
+        case 'CAMELS_ES' % 13
             d = fullfile(dirD,'daily','timeseries');
             ok = strcmp(stream,'daily') ...
                 && isfolder(d) ...
                 && local_count_files(d, ...
                 {'camelses_*.csv'}) > 0;
 
-        case 'BULL_ES'
+        case 'BULL_ES' % 14
             d = fullfile(dirD,'daily','timeseries');
             ok = strcmp(stream,'daily') ...
                 && local_count_files(fullfile(d,'streamflow'), ...
@@ -356,20 +897,20 @@ function ok = local_has_stream(cfg,stream)
                 && local_count_files(fullfile(d,'EMO1_arc'), ...
                 {'EMO1_*.csv'}) >= 484;
 
-        case 'CAMELS_FI' %12
+        case 'CAMELS_FI' % 15
             d = fullfile(dirD,'daily','timeseries');
             ok = strcmp(stream,'daily') ...
                 && isfolder(d) ...
                 && local_count_files(d, ...
                 {'CAMELS_FI_hydromet_timeseries_*.csv'}) > 0;
 
-        case 'CAMELS_FR' %13
+        case 'CAMELS_FR' % 16
             d = fullfile(dirD,'daily','timeseries');
             ok = isfolder(d) ...
                 && local_count_files(d, ...
                 {'CAMELS_FR_tsd_*.csv'}) >= 50;
 
-        case 'CAMELS_GB' %14
+        case 'CAMELS_GB' % 17
             dDaily = fullfile(dirD,'daily','timeseries');
             dHourly = fullfile(dirD,'hourly','timeseries');
             nDaily = local_count_files(dDaily,{'*.csv'});
@@ -388,7 +929,7 @@ function ok = local_has_stream(cfg,stream)
                 ok = false;
             end
 
-        case 'CAMELS_LUX' %15
+        case 'CAMELS_LUX' % 18
             d = fullfile(dirD,stream,'timeseries');
             if strcmp(stream,'daily')
                 pats = {['CAMELS_LUX_hydromet_' ...
@@ -416,13 +957,13 @@ function ok = local_has_stream(cfg,stream)
                 && isfolder(d) ...
                 && local_count_files(d,pats) >= nExpected;
 
-        case 'CAMELS_IL' %16
+        case 'CAMELS_IL' % 19
             d = fullfile(dirD,'daily','timeseries');
             ok = strcmp(stream,'daily') ...
                 && isfolder(d) ...
                 && local_count_files(d,{'il_*.csv'}) >= 95;
 
-        case 'CAMELS_IND' %17
+        case 'CAMELS_IND' % 20
             d = fullfile(dirD,'daily', ...
                 'catchment_mean_forcings');
             ok = isfile(fullfile(dirD,'daily', ...
@@ -430,9 +971,9 @@ function ok = local_has_stream(cfg,stream)
                 'streamflow_observed.csv')) ...
                 && isfolder(d) ...
                 && local_count_files(d, ...
-                {'*.csv'}) >= 242;
+                {'*.csv'}) >= 472;
 
-        case 'CAMELS_IS' %18
+        case 'CAMELS_IS' % 21
             dF = fullfile(dirD,stream,'forcing');
             dQ = fullfile(dirD,stream,'discharge');
 
@@ -458,61 +999,72 @@ function ok = local_has_stream(cfg,stream)
                     fullfile(dQ,'ID_1.csv'), ...
                     'discharge');
 
-        case 'CAMELS_JP'
+        case 'CAMELS_JP' % 22 
             d = fullfile(dirD,'daily','timeseries');
             ok = strcmp(stream,'daily') ...
                 && isfolder(d) ...
                 && local_count_files(d,{'varssim*.csv'}) >= 87;
 
-        case 'CAMELS_MX'
+        case 'CAMELS_MX' % 23
             d = fullfile(dirD,'daily','timeseries');
             ok = strcmp(stream,'daily') ...
                 && isfolder(d) ...
                 && local_count_files(d,{'hysets_*.csv'}) >= 46;
 
-        case 'MACH_US'
+        case 'MACH_US' % 24
             d = fullfile(dirD,'daily','timeseries');
             ok = strcmp(stream,'daily') ...
                 && isfolder(d) ...
                 && local_count_files(d,{'basin_*_MACH.csv'}) >= 1014;
 
-        case 'CAMELS_NZ' %19
+        case 'CAMELS_NZ' % 25
             ok = local_has_nz_timeseries( ...
                 dirD,stream);
 
-        case 'CAMELSH_KR'
+        case 'CAMELS_KR' % 26
+            ok = strcmp(stream,'daily') ...
+                && local_kr_install('status',dirD);
+
+        case 'CAMELSH_KR' % 27
             d = fullfile(dirD,'hourly','timeseries');
             ok = strcmp(stream,'hourly') ...
                 && isfolder(d) ...
                 && local_count_files(d,{'*.csv'}) >= 178;
 
+        case 'HYDRO_CIS' % 28
+            ok = strcmp(stream,'daily') ...
+                && local_ru_install('status',dirD);
+
         case {'CAMELS_ZA','CAMELS_NA','CAMELS_AR','CAMELS_BE', ...
-                'CAMELS_EE','CAMELS_IE','CAMELS_JM','CAMELS_NO','CAMELS_PR'}
-            d=fullfile(dirD,'daily','timeseries');
-            spec=local_grdc_africa_spec(extractAfter(region,'CAMELS_'));
-            ok=strcmp(stream,'daily')&&isfolder(d) ...
+                'CAMELS_EE','CAMELS_IE','CAMELS_JM', ...
+                'CAMELS_NO','CAMELS_PR'} % 29
+            d = fullfile(dirD,'daily','timeseries');
+            spec = local_grdc_africa_spec(extractAfter( ...
+                region,'CAMELS_'));
+            ok = strcmp(stream,'daily') ...
+                && isfolder(d) ...
                 && local_count_files(d,{'*.csv'})>=spec.count;
 
-        case 'CAMELS_PE' %20
+        case 'CAMELS_PE' % 30
             d = fullfile(dirD,'daily','timeseries');
             ok = strcmp(stream,'daily') ...
                 && isfolder(d) ...
                 && local_count_files(d,{'PE_*.csv'}) >= 136;
 
-        case 'CAMELS_PL' %21
+        case 'CAMELS_PL' % 31
             d = fullfile(dirD,'daily','timeseries');
             ok = strcmp(stream,'daily') ...
                 && isfolder(d) ...
                 && local_count_files(d, ...
                 {'CAMELS_PL_hydromet_timeseries_*.csv'}) >= 354;            
 
-        case 'CAMELS_SE' %22
+        case 'CAMELS_SE' % 32
             d = fullfile(dirD,'daily');
             ok = isfolder(d) ...
                 && local_count_files(d, ...
                 {'catchment_id_*.csv'}) >= 50;
 
-        case 'CAMELS_US' %23
+        case 'CAMELS_US' % 33
             if strcmp(stream,'daily')
                 d0 = fullfile(dirD,'daily');
                 dF = fullfile(dirD,'daily', ...
@@ -541,9 +1093,10 @@ function ok = local_has_stream(cfg,stream)
                      {'*.txt','*.csv','*.mat'}) > 0);
             end
 
-        case 'CAMELSH_US'
-            d=fullfile(dirD,'hourly','timeseries');
-            ok=strcmp(stream,'hourly')&&isfolder(d) ...
+        case 'CAMELSH_US' % 34
+            d = fullfile(dirD,'hourly','timeseries');
+            ok = strcmp(stream,'hourly') ...
+                && isfolder(d) ...
                 && local_count_files(d,{'*.nc'})>=3166;
 
         otherwise
@@ -575,6 +1128,25 @@ function ok = local_has_metadata(cfg)
             ok = local_all_files_exist(dirD, ...
                 local_br_metadata_files());
 
+        case 'CAMELS_ET'
+            ok=local_all_files_exist(dirD,{'gauge_information.txt', ...
+                'CAMELS_ET_topographic_attributes.csv', ...
+                'CAMELS_ET_soil_attributes.csv', ...
+                'CAMELS_ET_landcover_attributes.csv'});
+
+        case 'EStreams_PT'
+            ok=local_all_files_exist(dirD,{ ...
+                'estreams_gauging_stations_PT.csv', ...
+                'estreams_topography_attributes_PT.csv', ...
+                'estreams_soil_attributes_PT.csv', ...
+                'estreams_geology_attributes_PT.csv', ...
+                'estreams_geologycontinental_attributes_PT.csv', ...
+                'estreams_hydrology_attributes_PT.csv', ...
+                'estreams_vegetation_attributes_PT.csv', ...
+                'estreams_snowcover_attributes_PT.csv', ...
+                'estreams_meteorology_density_PT.csv', ...
+                'SNIRH_coverage.csv'});
+
         case 'CAMELS_CA' %4
             ok = isfile(fullfile(dirD, ...
                 'camels-spat-metadata.csv')) ...
@@ -599,7 +1171,7 @@ function ok = local_has_metadata(cfg)
                 'attributes_hydroatlas_camelscz.csv', ...
                 'attributes_other_camelscz.csv'});
 
-        case 'CAMELS_DE' %9
+        case {'CAMELS_DE','CAMELS_DEH'} %9
             stream = local_cfg_stream(cfg);
             dirDE = fullfile(dirD,stream);
             ok = local_all_files_exist(dirDE, ...
@@ -633,8 +1205,7 @@ function ok = local_has_metadata(cfg)
                 || isfile(fullfile(dAttr,'gauge_information.txt'));
 
         case 'CAMELS_IL' %15
-            d = fullfile(dirD,'daily');
-            ok = local_all_files_exist(d,{ ...
+            ok = local_all_files_exist(dirD,{ ...
                 'attributes_caravan_il.csv', ...
                 'attributes_hydroatlas_il.csv', ...
                 'attributes_other_il.csv'});
@@ -657,9 +1228,17 @@ function ok = local_has_metadata(cfg)
             ok = local_all_files_exist(dirD, ...
                 local_nz_metadata_files());
 
+        case 'CAMELS_KR'
+            ok = local_all_files_exist(dirD, ...
+                local_kr_install('metadata'));
+
         case 'CAMELSH_KR'
             ok = local_all_files_exist(dirD, ...
                 local_kr_metadata_files());
+
+        case 'HYDRO_CIS'
+            ok = local_all_files_exist(dirD, ...
+                local_ru_install('metadata'));
 
         case 'CAMELS_JP'
             ok = isfile(fullfile(dirD, ...
@@ -760,6 +1339,9 @@ function out = local_download(cfg,stream,ui)
         case 'CAMELS_BR' %3
             out = local_download_br(cfg,stream,ui);
     
+        case 'CAMELS_ET'
+            out = local_download_et(cfg,stream,ui);
+
         case 'CAMELS_CA' %4
             out = local_download_ca(cfg,stream,ui);
 
@@ -775,7 +1357,7 @@ function out = local_download(cfg,stream,ui)
         case 'CAMELS_CZ' %8
             out = local_download_cz(cfg,stream,ui);
 
-        case 'CAMELS_DE' %9
+        case {'CAMELS_DE','CAMELS_DEH'} %9
             out = local_download_de(cfg,stream,ui);
 
         case 'CAMELS_DK' %10
@@ -820,8 +1402,14 @@ function out = local_download(cfg,stream,ui)
         case 'CAMELS_NZ' %19
             out = local_download_nz(cfg,stream,ui);
 
-        case 'CAMELSH_KR'
+        case 'CAMELS_KR'
             out = local_download_kr(cfg,stream,ui);
+
+        case 'CAMELSH_KR'
+            out = local_download_krh(cfg,stream,ui);
+
+        case 'HYDRO_CIS'
+            out = local_download_ru(cfg,stream,ui);
 
         case 'CAMELS_ZA'
             out = local_download_za(cfg,stream,ui);
@@ -848,6 +1436,9 @@ function out = local_download(cfg,stream,ui)
 
         case 'CAMELS_PL' %21
             out = local_download_pl(cfg,stream,ui);
+
+        case 'EStreams_PT'
+            out = local_download_pt(cfg,stream,ui);
 
         case 'CAMELS_SE' %22
             out = local_download_se(cfg,stream,ui);
@@ -1325,7 +1916,7 @@ end
 % =============================================
 function out = local_download_au(cfg,stream,ui)
 % =============================================
-%LOCAL_DOWNLOAD_AU Download and install CAMELS-AU daily data.
+%LOCAL_DOWNLOAD_AU Download and install CAMELS-AUS v2 daily data.
     logFcn = local_ui_log(ui);
     if ~strcmp(stream,'daily')
         error('data_helpers:AUHourlyUnsupported', ...
@@ -1349,9 +1940,8 @@ function out = local_download_au(cfg,stream,ui)
     
     if ~local_ui_confirm(ui, ...
             'Download Australia data', ...
-            ['CAMELS-AU requires ' ...
-            'several PANGAEA files. ' ...
-            'The download may be large.' newline ...
+            ['CAMELS-AUS v2 requires several Zenodo files ' ...
+            '(approximately 2.1 GB in total). ' newline ...
             'Continue?'])
         out = struct('ok',false,'canceled',true);
         return
@@ -1439,6 +2029,14 @@ function out = local_download_au(cfg,stream,ui)
         % 4) master attributes table -> Data/CAMELS_AU
         local_install_au_master( ...
             files,dirD,logFcn);
+
+        % The metadata file is authoritative for the v2 561-basin
+        % universe. Keep the data copy and the region-module copy in sync.
+        local_write_au_basin_universe(dirD,cfg,logFcn);
+
+        % Written only after every v2 component has installed successfully.
+        writelines("CAMELS-AUS v2.03", ...
+            fullfile(dirD,'CAMELS_AUS_v2.03.installed'));
 
         % Clean downloaded archives/files and temporary unzip tree from
         % the user's Downloads folder. Installed data remain only under
@@ -2949,7 +3547,7 @@ function out = local_download_de_hourly(ui,dirD,logFcn)
         okTs = nTs > 0;
 
         out = struct('ok',okAttr && okTs, ...
-            'region','CAMELS_DE', ...
+            'region','CAMELS_DEH', ...
             'dirD',dirD, ...
             'dirM',fullfile(dirD,'timeseries'), ...
             'archive',zipFile, ...
@@ -3326,7 +3924,8 @@ function out = local_download_bull(cfg,stream,ui)
             end
             if i == 2 && (keepPartial || ~isfile(archives{i}))
                 local_download_bull_timeseries( ...
-                    urls{i},archives{i},d,logFcn);
+                    urls{i},archives{i},d,@() userCanceled, ...
+                    @ui_progress,logFcn);
             elseif ~isfile(archives{i})
                 local_download_file_retry(urls{i},archives{i}, ...
                     labels{i},d,@() userCanceled,@ui_progress,logFcn,3);
@@ -3421,7 +4020,8 @@ function out = local_download_bull(cfg,stream,ui)
     end
 end
 
-function local_download_bull_timeseries(url,targetFile,d,logFcn)
+function local_download_bull_timeseries(url,targetFile,d, ...
+    cancelFcn,progressFcn,logFcn)
 %LOCAL_DOWNLOAD_BULL_TIMESERIES Resume the 2.2 GB Zenodo transfer.
 
     expectedBytes = 2225187603;
@@ -3457,16 +4057,8 @@ function local_download_bull_timeseries(url,targetFile,d,logFcn)
         logFcn('Downloading BULL daily time series (2.225 GB) ...');
     end
 
-    cmd = sprintf(['curl -L --fail --ssl-no-revoke --retry 10 ' ...
-        '--retry-all-errors --retry-delay 5 --continue-at - ' ...
-        '-o "%s" "%s"'],targetFile,url);
-    [status,message] = system(cmd);
-    if status ~= 0
-        error('data_helpers:BULLDownloadInterrupted', ...
-            ['The BULL transfer was interrupted. The partial archive ' ...
-            'was retained and will resume on the next attempt. curl: %s'], ...
-            strtrim(message));
-    end
+    local_download_file_range_resume(url,targetFile,expectedBytes, ...
+        'BULL daily time series',d,cancelFcn,progressFcn,logFcn);
 
     info = dir(targetFile);
     if isempty(info) || info.bytes ~= expectedBytes
@@ -4545,10 +5137,11 @@ function out = local_download_il(cfg,stream,ui)
     end
 
     dirRoot = local_cfg_dirD(cfg,'CAMELS_IL');
-    dirD = fullfile(dirRoot,'daily');
-    dirTS = fullfile(dirD,'timeseries');
+    dirD = dirRoot;
+    dirDaily = fullfile(dirRoot,'daily');
+    dirTS = fullfile(dirDaily,'timeseries');
     local_mkdir(dirRoot);
-    local_mkdir(dirD);
+    local_mkdir(dirDaily);
     local_mkdir(dirTS);
 
     if ~local_ui_confirm(ui,'Download Israel data', ...
@@ -4572,6 +5165,7 @@ function out = local_download_il(cfg,stream,ui)
         'Starting CAMELS-IL download ...');
 
     try
+        local_prepare_il_gauge_information(dirRoot,logFcn);
         if local_il_install_complete(dirRoot)
             logFcn('CAMELS-IL daily data appear complete; skipping download.');
             out = struct('ok',true,'region','CAMELS_IL', ...
@@ -4626,7 +5220,7 @@ function out = local_download_il(cfg,stream,ui)
                 error('data_helpers:ILMissingAttribute', ...
                     'Missing archive file: %s',f);
             end
-            copyfile(f,fullfile(dirD,attrs{k}),'f');
+            copyfile(f,fullfile(dirRoot,attrs{k}),'f');
         end
 
         D = dir(fullfile(srcTS,'il_*.csv'));
@@ -4646,6 +5240,7 @@ function out = local_download_il(cfg,stream,ui)
             end
         end
 
+        local_prepare_il_gauge_information(dirRoot,logFcn);
         ok = local_il_install_complete(dirRoot);
         out = struct('ok',ok,'region','CAMELS_IL', ...
             'dirD',dirD,'dirM',dirTS,'dirQ',dirTS, ...
@@ -4672,12 +5267,34 @@ function out = local_download_il(cfg,stream,ui)
 end
 
 function tf = local_il_install_complete(dirRoot)
-    d = fullfile(dirRoot,'daily');
-    tf = local_all_files_exist(d,{ ...
+    tf = local_all_files_exist(dirRoot,{ ...
         'attributes_caravan_il.csv', ...
         'attributes_hydroatlas_il.csv', ...
-        'attributes_other_il.csv'}) ...
-        && local_count_files(fullfile(d,'timeseries'),{'il_*.csv'}) >= 95;
+        'attributes_other_il.csv', ...
+        'gauge_information.txt'}) ...
+        && local_count_files(fullfile(dirRoot,'daily','timeseries'), ...
+        {'il_*.csv'}) >= 95;
+end
+
+function local_prepare_il_gauge_information(dirRoot,logFcn)
+    gaugeFile = fullfile(dirRoot,'gauge_information.txt');
+    attributes = { ...
+        'attributes_caravan_il.csv', ...
+        'attributes_hydroatlas_il.csv', ...
+        'attributes_other_il.csv'};
+    if isfile(gaugeFile) ...
+            || ~local_all_files_exist(dirRoot,attributes)
+        return
+    end
+    try
+        read_attr('CAMELS_IL',dirRoot,struct('pr_attr',0));
+        if isfile(gaugeFile)
+            logFcn(['Created CAMELS-IL gauge metadata: ' gaugeFile]);
+        end
+    catch ME
+        logFcn(['WARNING: Could not create CAMELS-IL ' ...
+            'gauge_information.txt: ' ME.message]);
+    end
 end
 
 function payload = local_find_il_payload(root)
@@ -4878,7 +5495,7 @@ end
 
 
 % =============================================
-function out = local_download_kr(cfg,stream,ui)
+function out = local_download_krh(cfg,stream,ui)
 % =============================================
 %LOCAL_DOWNLOAD_KR Download and install hourly CAMELSH-KR from Zenodo.
 
@@ -5036,7 +5653,12 @@ function out = local_download_grdc_africa(cfg,stream,ui,requested)
     end
     url=['https://zenodo.org/records/15349031/files/' ...
         'GRDC_Caravan_extension_csv.zip?download=1'];
-    tmp=fullfile(local_cfg_root(cfg),'Data','_grdc_caravan_extract');
+    if isfield(cfg,'dirDroot') && ~isempty(cfg.dirDroot)
+        dataRoot=char(string(cfg.dirDroot));
+    else
+        dataRoot=fullfile(local_cfg_root(cfg),'Data');
+    end
+    tmp=fullfile(dataRoot,'_grdc_caravan_extract');
     % Remove obsolete country-local extraction folders left by older
     % versions of the South Africa/Namibia installer.
     for iclean=1:numel(specs)
@@ -5590,6 +6212,8 @@ function out = local_download_se(cfg,stream,ui)
     d = local_progress_dialog(ui, ...
         'Downloading Sweden data', ...
         'Starting CAMELS-SE download ...');
+    userCanceled = false;
+    lastUI = tic;
     try
         if ~isempty(d) && isvalid(d)
             d.Indeterminate = true;
@@ -5644,7 +6268,9 @@ function out = local_download_se(cfg,stream,ui)
         'catchment properties ...']);
     zipProp = fullfile(tmpDir, ...
         'catchment_properties.zip');
-    local_websave(zipProp,urlProp);
+    local_download_file_retry(urlProp,zipProp, ...
+        'CAMELS-SE catchment properties',d,@() userCanceled, ...
+        @(info) ui_progress(info,1,2),logFcn,3);
 
     try
         if ~isempty(d) ...
@@ -5684,7 +6310,9 @@ function out = local_download_se(cfg,stream,ui)
         'daily catchment time series ...']);
     zipTS = fullfile(tmpDir, ...
         'catchment_time_series.zip');
-    local_websave(zipTS,urlTS);
+    local_download_file_retry(urlTS,zipTS, ...
+        'CAMELS-SE daily time series',d,@() userCanceled, ...
+        @(info) ui_progress(info,2,2),logFcn,3);
     
     try
         if ~isempty(d) ...
@@ -5766,6 +6394,18 @@ function out = local_download_se(cfg,stream,ui)
             ME.message]);
     end
     local_close_progress(d);
+
+    function ui_progress(info,iFile,nFile)
+        if isfield(info,'frac') && isfinite(info.frac)
+            info.frac = ((iFile-1)+info.frac)/nFile;
+        else
+            info.frac = (iFile-1)/nFile;
+        end
+        info.label = sprintf('%s (%d/%d)', ...
+            local_info_label(info),iFile,nFile);
+        [userCanceled,lastUI] = local_update_progress_dialog( ...
+            d,info,lastUI,userCanceled);
+    end
 end
 
 % =============================================
@@ -5865,6 +6505,8 @@ function out = local_download_is(cfg,stream,ui)
     d = local_progress_dialog(ui, ...
         'Downloading Iceland data', ...
         ['Locating ' archiveName ' ...']);
+    userCanceled = false;
+    lastUI = tic;
 
     okArchive = local_is_valid_archive(zipFile);
     lastErr = '';
@@ -5896,11 +6538,12 @@ function out = local_download_is(cfg,stream,ui)
 
                 if strcmp(stream,'hourly')
                     local_download_is_large_archive( ...
-                        innerURLs{i},zipFile,archiveName,logFcn);
+                        innerURLs{i},zipFile,archiveName, ...
+                        @() userCanceled,@ui_progress,logFcn);
                 else
                     local_download_file_retry( ...
                         innerURLs{i},zipFile,archiveName,d, ...
-                        @() false,[],logFcn,3);
+                        @() userCanceled,@ui_progress,logFcn,3);
                 end
 
                 okArchive = local_is_valid_archive(zipFile);
@@ -5941,7 +6584,7 @@ function out = local_download_is(cfg,stream,ui)
                 local_download_file_retry( ...
                     bagURL,bagFile, ...
                     'Complete LamaH-Ice HydroShare resource', ...
-                    d,@() false,[],logFcn,3);
+                    d,@() userCanceled,@ui_progress,logFcn,3);
 
                 okBag = local_is_valid_archive(bagFile);
             catch ME
@@ -6144,6 +6787,11 @@ function out = local_download_is(cfg,stream,ui)
     end
 
     local_close_progress(d);
+
+    function ui_progress(info)
+        [userCanceled,lastUI] = local_update_progress_dialog( ...
+            d,info,lastUI,userCanceled);
+    end
 end
 
 function local_assert_is_timeseries_count(folder,expected,label)
@@ -6291,7 +6939,8 @@ function tf = local_is_valid_archive(fname)
     end
 end
 
-function local_download_is_large_archive(url,targetFile,label,logFcn)
+function local_download_is_large_archive(url,targetFile,label, ...
+    cancelFcn,progressFcn,logFcn)
 %LOCAL_DOWNLOAD_IS_LARGE_ARCHIVE Resume the 9.1 GB LamaH-Ice transfer.
 
     local_mkdir(fileparts(targetFile));
@@ -6318,16 +6967,23 @@ function local_download_is_large_archive(url,targetFile,label,logFcn)
         logFcn(strcat('Downloading ',label,' to ',targetFile));
     end
 
-    cmd = sprintf(['curl -L --fail --ssl-no-revoke --retry 5 ' ...
-        '--retry-delay 5 --continue-at - -o "%s" "%s"'], ...
-        targetFile,url);
-    [status,message] = system(cmd);
-    if status ~= 0
-        error('data_helpers:ISLargeDownloadFailed', ...
-            ['The resumable LamaH-Ice download stopped. Its partial file ' ...
-             'was retained and will resume on the next attempt. curl: %s'], ...
-            strtrim(message));
+    partFile = [targetFile '.part'];
+    if isfile(targetFile)
+        if isfile(partFile)
+            partInfo = dir(partFile);
+            targetInfo = dir(targetFile);
+            if targetInfo.bytes > partInfo.bytes
+                delete(partFile);
+                movefile(targetFile,partFile,'f');
+            else
+                delete(targetFile);
+            end
+        else
+            movefile(targetFile,partFile,'f');
+        end
     end
+    local_download_file_streaming(url,targetFile,label, ...
+        cancelFcn,progressFcn,logFcn);
     if ~local_is_valid_archive(targetFile)
         error('data_helpers:ISIncompleteArchive', ...
             ['The LamaH-Ice transfer ended without a valid ZIP central ' ...
@@ -7233,6 +7889,7 @@ function out = local_download_us(cfg,stream,ui)
     
     opts = struct();
     opts.region = 'CAMELS_US';
+    opts.dataRoot = cfg.dirDroot;
     opts.force = false;
     % Do not leave downloaded archives behind after a successful install.
     opts.keepArchives = false;
@@ -8236,8 +8893,7 @@ end
 % ======================================
 function files = local_camels_au_files()
 % ======================================
-    base = ['https://download.pangaea.de/' ...
-        'dataset/921850/files/'];
+    base = 'https://zenodo.org/records/14289037/files/';
     files = struct('key',{},'label',{}, ...
         'fileName',{},'url',{},'isZip',{});
     files(end+1) = local_au_file('metadata', ...
@@ -8259,12 +8915,22 @@ function files = local_camels_au_files()
         f.key = key;
         f.label = label;
         f.fileName = fileName;
-        f.url = [base fileName];
+        f.url = [base strrep(fileName,'&','%26') '?download=1'];
         f.isZip = isZip;
     end
 end
 
 function tf = local_au_target_complete(dirD,f)
+    % A v1 installation has many identically named files. The marker keeps
+    % it from being mistaken for the enlarged 561-basin v2 installation.
+    % A failed finalization can leave every v2 file installed but no marker;
+    % recognize the 561-row v2 metadata so a retry resumes locally instead
+    % of downloading all archives again.
+    if ~isfile(fullfile(dirD,'CAMELS_AUS_v2.03.installed')) ...
+            && ~local_au_has_v2_metadata(dirD)
+        tf = false;
+        return
+    end
     switch f.key
         case 'metadata'
             tf = isfile(fullfile(dirD, ...
@@ -8280,7 +8946,7 @@ function tf = local_au_target_complete(dirD,f)
                 'precipitation_SILO.csv')) ...
                 && isfile(fullfile(dirD,'daily', ...
                 'precipitation', ...
-                'precipitation_AWAP.csv')) ...
+                'precipitation_AGCD.csv')) ...
                 && local_count_files( ...
                 fullfile(dirD,'daily', ...
                 'evaporative_demand'), ...
@@ -8293,10 +8959,10 @@ function tf = local_au_target_complete(dirD,f)
                 'tmax_SILO.csv')) ...
                 && isfile(fullfile(dirD,'daily', ...
                 'temperature', ...
-                'tmin_AWAP.csv')) ...
+                'tmin_AGCD.csv')) ...
                 && isfile(fullfile(dirD,'daily', ...
                 'temperature', ...
-                'tmax_AWAP.csv'));
+                'tmax_AGCD.csv'));
         case 'master'
             tf = isfile(fullfile(dirD, ...
                 ['CAMELS_AUS_Attributes&' ...
@@ -8371,7 +9037,7 @@ function local_install_au_hydromet(files, ...
     
     local_copy_au_named_files(root,precDst, ...
         {'precipitation_SILO.csv', ...
-        'precipitation_AWAP.csv'},logFcn);
+        'precipitation_AGCD.csv'},logFcn);
     
     local_copy_au_named_files(root,petDst, ...
         {'evap_syn_SILO.csv', ...
@@ -8385,7 +9051,43 @@ function local_install_au_hydromet(files, ...
     
     local_copy_au_named_files(root,tmpDst, ...
         {'tmin_SILO.csv','tmax_SILO.csv', ...
-         'tmin_AWAP.csv','tmax_AWAP.csv'},logFcn);
+         'tmin_AGCD.csv','tmax_AGCD.csv'},logFcn);
+end
+
+function local_write_au_basin_universe(dirD,cfg,logFcn)
+    meta = local_find_file_recursive(dirD, ...
+        {'id_name_metadata.csv','01_id_name_metadata.csv'});
+    if isempty(meta)
+        error('data_helpers:AUMissingMetadata', ...
+            'Cannot create the CAMELS-AUS v2 basin universe: metadata is missing.');
+    end
+    ids = local_read_au_metadata_ids(meta);
+    if numel(ids) ~= 561
+        error('data_helpers:AUBasinCount', ...
+            'Expected 561 CAMELS-AUS v2 station IDs, found %d.',numel(ids));
+    end
+
+    basinName = 'AU_561_basins.txt';
+    sage = '';
+    if isfield(cfg,'SAGEhydro'), sage = char(string(cfg.SAGEhydro)); end
+    if isempty(sage) && isfield(cfg,'SAGEdir')
+        sage = char(string(cfg.SAGEdir));
+    end
+    if isempty(sage)
+        sage = fileparts(fileparts(mfilename('fullpath')));
+    end
+    regionDir = fullfile(sage,'regions','AU');
+    regionFile = fullfile(regionDir,basinName);
+    if ~isdeployed
+        local_mkdir(regionDir);
+        writelines(ids,regionFile);
+    elseif ~isfile(regionFile)
+        error('data_helpers:AUMissingBasinUniverse', ...
+            ['The deployed application does not contain the canonical ' ...
+             'CAMELS-AUS basin list: %s'],regionFile);
+    end
+    logFcn(sprintf(['Verified CAMELS-AUS v2 universal basin list ' ...
+        '(%d basins): %s'],numel(ids),regionFile));
 end
 
 function local_install_au_master(files,dirD,logFcn)
@@ -8512,7 +9214,7 @@ end
 
 function local_download_file(url,targetFile, ...
     label,~,cancelFcn,progressFcn,logFcn)
-%LOCAL_DOWNLOAD_FILE Robust downloader with Figshare/browser fallback.
+%LOCAL_DOWNLOAD_FILE Robust downloader with progress and browser fallback.
 % Some Figshare ndownloader links work in Chrome but return zero bytes
 % through MATLAB websave/curl on some Windows systems.  In that case we
 % open the URL in the default browser and wait until the browser-created
@@ -8555,7 +9257,25 @@ function local_download_file(url,targetFile, ...
     ok = false;
     msg = '';
 
-    % 1) Try MATLAB websave first.
+    % 1) Prefer the shared streaming downloader. It reports byte-level
+    % progress whenever the server supplies Content-Length, retains a .part
+    % file after interruption, and resumes it when HTTP ranges are honored.
+    try
+        local_download_file_streaming(url,targetFile,label, ...
+            cancelFcn,progressFcn,logFcn);
+        ok = isfile(targetFile) ...
+            && dir(targetFile).bytes > 0;
+    catch ME0
+        if strcmp(ME0.identifier,'data_helpers:DownloadCanceled')
+            rethrow(ME0);
+        end
+        msg = ['streaming: ' ME0.message];
+        logFcn([label ' streaming download failed; trying fallback: ' ...
+            ME0.message]);
+    end
+
+    % 2) Try MATLAB websave.
+    if ~ok
     try
         opts = weboptions('Timeout',Inf, ...
             'UserAgent',['Mozilla/5.0 ' ...
@@ -8572,8 +9292,9 @@ function local_download_file(url,targetFile, ...
     catch ME
         msg = ME.message;
     end
+    end
 
-    % 2) Try Windows curl.  --ssl-no-revoke avoids common schannel
+    % 3) Try Windows curl.  --ssl-no-revoke avoids common schannel
     % revocation failures on some Windows installations.
     if ~ok
         try
@@ -8596,7 +9317,7 @@ function local_download_file(url,targetFile, ...
         end
     end
 
-    % 3) Try PowerShell.  Some machines block curl but allow .NET.
+    % 4) Try PowerShell.  Some machines block curl but allow .NET.
     if ~ok
         try
             if cancelFcn()
@@ -8624,7 +9345,7 @@ function local_download_file(url,targetFile, ...
         end
     end
 
-    % 4) Last resort for Figshare: open the link in the browser and wait
+    % 5) Last resort for Figshare: open the link in the browser and wait
     % for the browser download to finish.  This matches the behavior that
     % works when the same link is pasted into Chrome.
     if ~ok && contains(url,'figshare.canterbury.ac.nz')
@@ -8659,6 +9380,318 @@ function local_download_file(url,targetFile, ...
             [label ' downloaded'], ...
             'frac',1,'speedMBs',NaN));
     end
+
+    % A fallback completed the final file, so a stale streaming partial is
+    % no longer needed. Never remove the final target here.
+    partFile = [targetFile '.part'];
+    if isfile(partFile)
+        try
+            delete(partFile);
+        catch
+        end
+    end
+end
+
+function local_download_file_streaming(url,targetFile,label, ...
+    cancelFcn,progressFcn,logFcn)
+%LOCAL_DOWNLOAD_FILE_STREAMING Stream to .part with progress and resuming.
+% A server-provided Content-Length enables exact percentage, speed, and
+% remaining-time reporting. If a retained .part file exists, an HTTP Range
+% request is attempted; servers that ignore Range are restarted safely.
+
+    if nargin < 6 || isempty(logFcn)
+        logFcn = @(s) fprintf('%s\n',char(string(s)));
+    end
+    if nargin < 4 || isempty(cancelFcn)
+        cancelFcn = @() false;
+    end
+
+    targetFile = char(string(targetFile));
+    url = char(string(url));
+    partFile = [targetFile '.part'];
+    local_mkdir(fileparts(targetFile));
+
+    firstByte = 0;
+    if isfile(partFile)
+        partInfo = dir(partFile);
+        firstByte = double(partInfo.bytes);
+    end
+
+    u = java.net.URL(url);
+    c = u.openConnection();
+    try
+        c.setConnectTimeout(60000);
+        c.setReadTimeout(300000);
+        c.setRequestProperty('User-Agent','Mozilla/5.0');
+        if firstByte > 0
+            c.setRequestProperty('Range',sprintf('bytes=%d-',firstByte));
+        end
+    catch
+    end
+
+    try
+        statusCode = double(c.getResponseCode());
+    catch ME
+        error('data_helpers:StreamingConnectFailed', ...
+            'Could not connect to %s: %s',url,ME.message);
+    end
+    if statusCode >= 400
+        error('data_helpers:StreamingHTTPError', ...
+            'The server returned HTTP %d for %s.',statusCode,url);
+    end
+
+    appendFile = firstByte > 0 && statusCode == 206;
+    if firstByte > 0 && ~appendFile
+        logFcn(sprintf(['%s server does not support resuming; ' ...
+            'restarting the partial download.'],label));
+        firstByte = 0;
+    end
+
+    contentBytes = NaN;
+    try
+        contentBytes = double(c.getContentLengthLong());
+    catch
+    end
+    totalBytes = NaN;
+    if isfinite(contentBytes) && contentBytes >= 0
+        totalBytes = firstByte + contentBytes;
+    end
+    if statusCode == 206
+        try
+            contentRange = char(c.getHeaderField('Content-Range'));
+            token = regexp(contentRange,'/(\d+)$','tokens','once');
+            if ~isempty(token)
+                totalBytes = str2double(token{1});
+            end
+        catch
+        end
+    end
+
+    in = [];
+    out = [];
+    t0 = tic;
+    bytesDone = firstByte;
+    try
+        in = c.getInputStream();
+        if appendFile
+            out = java.io.FileOutputStream(partFile,true);
+        else
+            out = java.io.FileOutputStream(partFile,false);
+        end
+        local_download_progress(progressFcn,label,bytesDone, ...
+            totalBytes,0,NaN);
+
+        bufSize = 1024*1024;
+        buf = int8(zeros(bufSize,1));
+        lastUpdate = tic;
+        while true
+            if cancelFcn()
+                error('data_helpers:DownloadCanceled', ...
+                    'Download canceled by user. The partial file was preserved.');
+            end
+            nRead = in.read(buf,0,bufSize);
+            if nRead < 0
+                break
+            end
+            out.write(buf,0,nRead);
+            bytesDone = bytesDone + double(nRead);
+            if toc(lastUpdate) >= 0.25
+                elapsed = max(toc(t0),eps);
+                speedMBs = (bytesDone-firstByte)/elapsed/1024^2;
+                local_download_progress(progressFcn,label,bytesDone, ...
+                    totalBytes,speedMBs,elapsed);
+                lastUpdate = tic;
+            end
+        end
+        try out.close(); catch, end
+        try in.close(); catch, end
+    catch ME
+        try if ~isempty(out), out.close(); end; catch, end
+        try if ~isempty(in), in.close(); end; catch, end
+        rethrow(ME);
+    end
+
+    if isfinite(totalBytes) && bytesDone ~= totalBytes
+        error('data_helpers:StreamingSizeMismatch', ...
+            ['Downloaded %d of %d bytes for %s. The partial file was ' ...
+            'preserved for a later retry.'],bytesDone,totalBytes,label);
+    end
+    if bytesDone <= 0
+        error('data_helpers:StreamingEmptyFile', ...
+            'The server returned an empty file for %s.',label);
+    end
+
+    elapsed = max(toc(t0),eps);
+    speedMBs = (bytesDone-firstByte)/elapsed/1024^2;
+    local_download_progress(progressFcn,label,bytesDone, ...
+        totalBytes,speedMBs,elapsed);
+
+    if isfile(targetFile)
+        delete(targetFile);
+    end
+    [moved,msg] = movefile(partFile,targetFile,'f');
+    if ~moved
+        error('data_helpers:StreamingPromoteFailed', ...
+            'Could not rename the completed partial file: %s',msg);
+    end
+    logFcn(sprintf('%s download complete (%.2f MB).', ...
+        label,bytesDone/1024^2));
+end
+
+function local_download_progress(progressFcn,label,bytesDone, ...
+    totalBytes,speedMBs,elapsed)
+%LOCAL_DOWNLOAD_PROGRESS Emit one consistent progress-information packet.
+    if isempty(progressFcn)
+        return
+    end
+    frac = NaN;
+    etaSec = NaN;
+    if isfinite(totalBytes) && totalBytes > 0
+        frac = min(max(bytesDone/totalBytes,0),1);
+        if isfinite(speedMBs) && speedMBs > 0
+            etaSec = max((totalBytes-bytesDone)/1024^2/speedMBs,0);
+        end
+    end
+    progressFcn(struct('label',label,'bytes',bytesDone, ...
+        'totalBytes',totalBytes,'frac',frac,'speedMBs',speedMBs, ...
+        'etaSec',etaSec,'elapsedSec',elapsed, ...
+        'indeterminate',~isfinite(frac)));
+end
+
+function local_download_file_range_resume(url,targetFile,totalBytes, ...
+    label,~,cancelFcn,progressFcn,logFcn)
+%LOCAL_DOWNLOAD_FILE_RANGE_RESUME Resume a large file in HTTP byte ranges.
+% Completed chunks are appended immediately, so an interrupted transfer
+% can continue from the current file size without discarding prior data.
+
+    import matlab.net.URI
+    import matlab.net.http.HeaderField
+    import matlab.net.http.HTTPOptions
+    import matlab.net.http.RequestMessage
+
+    if nargin < 8 || isempty(logFcn)
+        logFcn=@(s)fprintf('%s\n',char(string(s)));
+    end
+    if nargin < 6 || isempty(cancelFcn)
+        cancelFcn=@()false;
+    end
+
+    chunkBytes=64*1024^2;
+    maxTries=5;
+    uri=URI(char(string(url)));
+    targetFile=char(string(targetFile));
+    local_mkdir(fileparts(targetFile));
+
+    if ~isfile(targetFile)
+        fid=fopen(targetFile,'wb');
+        if fid < 0
+            error('data_helpers:RangeCreateFailed', ...
+                'Could not create %s.',targetFile);
+        end
+        fclose(fid);
+    end
+
+    fileInfo=dir(targetFile);
+    firstByte=fileInfo.bytes;
+    if firstByte > totalBytes
+        error('data_helpers:RangeTargetTooLarge', ...
+            '%s is larger than the official file.',targetFile);
+    end
+
+    t0=tic;
+    startByte=firstByte;
+    if ~isempty(progressFcn)
+        progressFcn(struct('label',label,'bytes',firstByte, ...
+            'totalBytes',totalBytes, ...
+            'frac',double(firstByte)/double(totalBytes), ...
+            'speedMBs',NaN,'etaSec',NaN));
+    end
+    while firstByte < totalBytes
+        if cancelFcn()
+            error('data_helpers:DownloadCanceled', ...
+                'Download canceled by user at byte %d.',firstByte);
+        end
+
+        lastByte=min(firstByte+chunkBytes-1,totalBytes-1);
+        rangeText=sprintf('bytes=%d-%d',firstByte,lastByte);
+        lastME=[];
+        received=false;
+
+        for k=1:maxTries
+            try
+                request=RequestMessage('get', ...
+                    HeaderField('Range',rangeText));
+                options=HTTPOptions('ConvertResponse',false, ...
+                    'ConnectTimeout',60,'ResponseTimeout',300);
+                response=request.send(uri,options);
+                if double(response.StatusCode) ~= 206
+                    error('data_helpers:RangeNotHonored', ...
+                        ['The server returned HTTP %d instead of 206 ' ...
+                        'for %s. The partial archive was preserved.'], ...
+                        double(response.StatusCode),rangeText);
+                end
+
+                bytes=response.Body.Data;
+                expectedCount=lastByte-firstByte+1;
+                if ~isa(bytes,'uint8') || numel(bytes) ~= expectedCount
+                    error('data_helpers:RangeLengthMismatch', ...
+                        ['The server returned %d instead of %d bytes for ' ...
+                        '%s. The partial archive was preserved.'], ...
+                        numel(bytes),expectedCount,rangeText);
+                end
+
+                fid=fopen(targetFile,'ab');
+                if fid < 0
+                    error('data_helpers:RangeAppendFailed', ...
+                        'Could not append to %s.',targetFile);
+                end
+                cleanupFile=onCleanup(@()fclose(fid));
+                written=fwrite(fid,bytes,'uint8');
+                clear cleanupFile
+                if written ~= expectedCount
+                    error('data_helpers:RangeWriteFailed', ...
+                        'Wrote %d instead of %d bytes to %s.', ...
+                        written,expectedCount,targetFile);
+                end
+                received=true;
+                break
+            catch ME
+                lastME=ME;
+                logFcn(sprintf(['%s range %s attempt %d/%d failed: ' ...
+                    '%s'],label,rangeText,k,maxTries,ME.message));
+                if k < maxTries
+                    pause(min(2*k,10));
+                end
+            end
+        end
+
+        if ~received
+            rethrow(lastME);
+        end
+
+        firstByte=lastByte+1;
+        elapsed=max(toc(t0),eps);
+        speedMBs=(firstByte-startByte)/elapsed/1024^2;
+        frac=double(firstByte)/double(totalBytes);
+        etaSec=NaN;
+        if isfinite(speedMBs) && speedMBs > 0
+            etaSec=(totalBytes-firstByte)/1024^2/speedMBs;
+        end
+        if ~isempty(progressFcn)
+            progressFcn(struct('label',label,'bytes',firstByte, ...
+                'totalBytes',totalBytes,'frac',frac, ...
+                'speedMBs',speedMBs,'etaSec',etaSec));
+        end
+    end
+
+    finalInfo=dir(targetFile);
+    if finalInfo.bytes ~= totalBytes
+        error('data_helpers:RangeFinalSize', ...
+            ['The resumed file has %d bytes; expected %d. The partial ' ...
+            'archive was preserved.'],finalInfo.bytes,totalBytes);
+    end
+    logFcn(sprintf(['Completed resumable download: %s ' ...
+        '(%d bytes).'],targetFile,totalBytes));
 end
 
 function ok = local_wait_for_browser_download( ...
@@ -8870,6 +9903,42 @@ function local_cleanup_download_folder(folder,logFcn)
         logFcn(['Could not delete temporary download folder: ' ...
             folder ' | ' ME.message]);
     end
+end
+
+function tf = local_au_has_v2_metadata(dirD)
+    tf = false;
+    meta = local_find_file_recursive(dirD, ...
+        {'id_name_metadata.csv','01_id_name_metadata.csv'});
+    if isempty(meta)
+        return
+    end
+    try
+        ids = local_read_au_metadata_ids(meta);
+        tf = numel(ids) == 561;
+    catch
+        tf = false;
+    end
+end
+
+function ids = local_read_au_metadata_ids(meta)
+    % station_id is the first field. Reading the complete v2 CSV with
+    % readtable merges records containing quoted line breaks and returns
+    % fewer than the 561 physical station rows, so read this authoritative
+    % identifier field directly from each physical line.
+    lines = readlines(meta);
+    if isempty(lines)
+        error('data_helpers:AUMissingStationId', ...
+            'CAMELS-AUS v2 metadata is empty.');
+    end
+    header = erase(strip(extractBefore(lines(1),',')),'"');
+    if ~strcmpi(header,'station_id')
+        error('data_helpers:AUMissingStationId', ...
+            'CAMELS-AUS v2 metadata has no leading station_id column.');
+    end
+    ids = erase(strip(extractBefore(lines(2:end),',')),'"');
+    ids = regexprep(ids,'\.0+$','');
+    ids = ids(strlength(ids)>0 & ~ismissing(ids));
+    ids = unique(ids,'stable');
 end
 
 function tf = local_is_safe_download_cleanup_target(target)
@@ -9120,6 +10189,13 @@ function dirD = local_cfg_dirD(cfg,region)
         region = local_cfg_region(cfg);
     end
 
+    dataRegion = region;
+    if strcmpi(region,'CAMELS_DEH')
+        % CAMELS-DE and CAMELS-DE-1h are separate dataset selections but
+        % retain the established shared Data/CAMELS_DE storage root.
+        dataRegion = 'CAMELS_DE';
+    end
+
     if isstruct(cfg) ...
             && isfield(cfg,'dirD') ...
             && ~isempty(cfg.dirD)
@@ -9128,7 +10204,7 @@ function dirD = local_cfg_dirD(cfg,region)
         [parentDir,lastFolder] = fileparts(dirD0);
 
         % Normal regional root, for example Data/CAMELS_GB.
-        if strcmpi(lastFolder,region)
+        if strcmpi(lastFolder,dataRegion)
             dirD = dirD0;
             return
         end
@@ -9138,19 +10214,26 @@ function dirD = local_cfg_dirD(cfg,region)
         % Recover Data/CAMELS_GB before constructing stream paths.
         if any(strcmpi(lastFolder,{'daily','hourly','15min'}))
             [~,parentName] = fileparts(parentDir);
-            if strcmpi(parentName,region)
+            if strcmpi(parentName,dataRegion)
                 dirD = parentDir;
                 return
             end
         end
     end
 
-    root = local_cfg_root(cfg);
-    dirD = fullfile(root,'Data',region);
+    if isfield(cfg,'dirDroot') && ~isempty(cfg.dirDroot)
+        dataRoot = char(string(cfg.dirDroot));
+    else
+        dataRoot = fullfile(local_cfg_root(cfg),'Data');
+    end
+    dirD = fullfile(dataRoot,dataRegion);
 end
 
 function dirD = local_data_dir(root,region)
     region = local_region_code(region);
+    if strcmpi(region,'CAMELS_DEH')
+        region = 'CAMELS_DE';
+    end
     dirD = fullfile(char( ...
         string(root)),'Data',region);
 end
@@ -9185,6 +10268,8 @@ function d = local_stream_dir(cfg,stream)
             else
                 d = '';
             end
+        case 'CAMELS_ET'
+            if strcmp(stream,'daily'), d=fullfile(dirD,'daily','timeseries'); else, d=''; end
         case 'CAMELS_CA'
             if strcmp(stream,'daily')
                 d = fullfile(dirD,'daily','forcing','daymet');
@@ -9226,7 +10311,7 @@ function d = local_stream_dir(cfg,stream)
             else
                 d = '';
             end
-        case 'CAMELS_DE'
+        case {'CAMELS_DE','CAMELS_DEH'}
             if strcmp(stream,'daily')
                 d = fullfile(dirD,'daily','timeseries');
             elseif strcmp(stream,'hourly')
@@ -9322,9 +10407,18 @@ function d = local_stream_dir(cfg,stream)
             else
                 d = '';
             end
+        case 'CAMELS_KR'
+            if strcmp(stream,'daily'), d=fullfile(dirD,'daily','forcing');
+            else, d=''; end
         case 'CAMELSH_KR'
             if strcmp(stream,'hourly')
                 d = fullfile(dirD,'hourly','timeseries');
+            else
+                d = '';
+            end
+        case 'HYDRO_CIS'
+            if strcmp(stream,'daily')
+                d = fullfile(dirD,'daily','timeseries');
             else
                 d = '';
             end
@@ -9369,6 +10463,10 @@ function name = local_region_name(region)
         name = 'United States / CAMELSH-US';
         return
     end
+    if strcmp(r,'CAMELS_ET')
+        name = 'Ethiopia / CAMELS-Eth';
+        return
+    end
     if strcmp(r,'CAMELS_CA')
         name = 'Canada / CAMELS-SPAT';
         return
@@ -9379,6 +10477,10 @@ function name = local_region_name(region)
     end
     if strcmp(r,'CAMELS_DK')
         name = 'Denmark / CAMELS-DK';
+        return
+    end
+    if strcmp(r,'HYDRO_CIS')
+        name = 'Russia / HydroCIS';
         return
     end
     if strcmp(r,'CAMELS_MX')
@@ -9436,15 +10538,6 @@ function [userCanceled,lastUI] = ...
         return
     end
     
-    if isfield(info,'indeterminate') ...
-            && logical(info.indeterminate)
-        d.Indeterminate = true;
-        d.Message = sprintf('%s: downloading ...', ...
-            local_info_label(info));
-        drawnow limitrate nocallbacks
-        return
-    end
-
     if toc(lastUI) < 0.25
         return
     end
@@ -9457,31 +10550,94 @@ function [userCanceled,lastUI] = ...
         drawnow limitrate nocallbacks
         return
     end
+
+    if isfield(info,'indeterminate') ...
+            && logical(info.indeterminate)
+        d.Indeterminate = true;
+        speed = local_info_speed(info);
+        amount = '';
+        if isfield(info,'bytes') ...
+                && isfinite(info.bytes) ...
+                && info.bytes >= 0
+            if double(info.bytes) >= 1e9
+                amount = sprintf('%.2f GB downloaded', ...
+                    double(info.bytes)/1e9);
+            else
+                amount = sprintf('%.1f MB downloaded', ...
+                    double(info.bytes)/1024^2);
+            end
+        end
+        elapsed = '';
+        if isfield(info,'elapsedSec') ...
+                && isfinite(info.elapsedSec) ...
+                && info.elapsedSec >= 0
+            elapsed = ['elapsed ' local_fmt_eta(info.elapsedSec)];
+        end
+        details = {};
+        if ~isempty(amount)
+            details{end+1} = amount;
+        end
+        if isfinite(speed)
+            details{end+1} = sprintf('%.2f MB/s',speed);
+        end
+        if ~isempty(elapsed)
+            details{end+1} = elapsed;
+        end
+        if ~isempty(details)
+            d.Message = sprintf('%s: downloading ... (%s)', ...
+                local_info_label(info),strjoin(details,', '));
+        else
+            d.Message = sprintf('%s: downloading ...', ...
+                local_info_label(info));
+        end
+        drawnow limitrate nocallbacks
+        return
+    end
     
     if isfield(info,'frac') ...
             && isfinite(info.frac)
         d.Indeterminate = false;
         d.Value = info.frac;
         speed = local_info_speed(info);
+        label = local_info_label(info);
+        showBytes = false;
+        if isfield(info,'bytes') && isfinite(info.bytes) ...
+                && isfield(info,'totalBytes') ...
+                && isfinite(info.totalBytes) && info.totalBytes > 0
+            byteFrac = double(info.bytes)/double(info.totalBytes);
+            showBytes = abs(byteFrac-double(info.frac)) < 1e-4;
+        end
+        if showBytes
+            if double(info.totalBytes) >= 1e9
+                amount = sprintf('%.2f / %.2f GB, ', ...
+                    double(info.bytes)/1e9,double(info.totalBytes)/1e9);
+            else
+                amount = sprintf('%.1f / %.1f MB, ', ...
+                    double(info.bytes)/1024^2, ...
+                    double(info.totalBytes)/1024^2);
+            end
+        else
+            amount = '';
+        end
         if isfield(info,'etaSec') ...
                 && isfinite(info.etaSec)
             if isfinite(speed)
-                d.Message = sprintf(['Downloaded: %5.1f%%  ' ...
+                d.Message = sprintf(['%s: %s%5.1f%%  ' ...
                     '(%.2f MB/s, Time remaining %s)'], ...
-                    100*info.frac, ...
+                    label,amount,100*info.frac, ...
                     speed,local_fmt_eta(info.etaSec));
             else
-                d.Message = sprintf('Downloaded: %5.1f%%', ...
-                    100*info.frac);
+                d.Message = sprintf('%s: %s%5.1f%%', ...
+                    label,amount,100*info.frac);
             end
         else
             if isfinite(speed)
-                d.Message = sprintf(['Downloaded: %5.1f%%  ' ...
+                d.Message = sprintf(['%s: %s%5.1f%%  ' ...
                     '(%.2f MB/s)'], ...
-                    100*info.frac,speed);
+                    label,amount,100*info.frac,speed);
             else
-                d.Message = sprintf('Downloaded: %5.1f%%', ...
-                    100*info.frac);
+                d.Message = sprintf('%s: %s%5.1f%%', ...
+                    label,amount,100*info.frac);
             end
         end
     else
@@ -9975,16 +11131,22 @@ end
 function out = local_download_pe(cfg,stream,ui)
 %LOCAL_DOWNLOAD_PE Download and install CAMELS-PE v1.0.1.
     if ~strcmpi(stream,'daily')
-        error('data_helpers:PEdailyOnly','CAMELS-PE supports daily data only.');
+        error('data_helpers:PEdailyOnly', ...
+            'CAMELS-PE supports daily data only.');
     end
     dirD = local_cfg_dirD(cfg,'CAMELS_PE');
     dirTS = fullfile(dirD,'daily','timeseries');
-    local_mkdir(dirD); local_mkdir(fullfile(dirD,'daily')); local_mkdir(dirTS);
+    local_mkdir(dirD); 
+    local_mkdir(fullfile(dirD,'daily')); 
+    local_mkdir(dirTS);
     logFcn = local_ui_log(ui);
     if ~local_ui_confirm(ui,'Download Peru data', ...
-            ['Download CAMELS-PE v1.0.1 from Zenodo? The archive contains ' ...
-             '136 daily catchment time series, seven attribute files, and two metadata files.'])
-        out = struct('ok',false,'canceled',true); return
+            ['Download CAMELS-PE v1.0.1 from Zenodo? ' ...
+            'The archive contains ' ...
+             '136 daily catchment time series, ' ...
+             'seven attribute files, and two metadata files.'])
+        out = struct('ok',false,'canceled',true); 
+        return
     end
     downloadDir = local_default_download_dir();
     zipFile = fullfile(downloadDir,'CAMELS-PE_v1.0.1.zip');
@@ -10000,7 +11162,8 @@ function out = local_download_pe(cfg,stream,ui)
             logFcn('CAMELS-PE daily data appear complete; skipping download.');
             out = struct('ok',true,'region','CAMELS_PE','dirD',dirD, ...
                 'dirM',dirTS,'dirQ',dirTS,'archive','','unzipDir','');
-            local_close_progress(d); return
+            local_close_progress(d); 
+            return
         end
         if isfile(zipFile)
             try
@@ -10014,20 +11177,29 @@ function out = local_download_pe(cfg,stream,ui)
                 @() userCanceled,@(info) ui_progress(info),logFcn,3);
         end
         if userCanceled
-            out = struct('ok',false,'canceled',true); local_close_progress(d); return
+            out = struct('ok',false,'canceled',true); 
+            local_close_progress(d); 
+            return
         end
         local_verify_md5(zipFile,expectedMD5,logFcn);
-        if isfolder(unzipDir), rmdir(unzipDir,'s'); end
-        local_mkdir(unzipDir); unzip(zipFile,unzipDir);
+        if isfolder(unzipDir)
+            rmdir(unzipDir,'s'); 
+        end
+        local_mkdir(unzipDir); 
+        unzip(zipFile,unzipDir);
         payload = local_find_pe_payload(unzipDir);
         if isempty(payload)
             error('data_helpers:PEMissingPayload', ...
-                'Could not locate CAMELS-PE/01_metadata through 03_timeseries.');
+                ['Could not locate CAMELS-PE/01_metadata ' ...
+                'through 03_timeseries.']);
         end
         metaFiles = {'stations.csv','data_dictionary.csv'};
-        attrFiles = {'climatic_indices.csv','geologic_attributes.csv', ...
-            'human_intervention_attributes.csv','hydrological_signatures.csv', ...
-            'landcover_attributes.csv','soil_attributes.csv', ...
+        attrFiles = {'climatic_indices.csv', ...
+            'geologic_attributes.csv', ...
+            'human_intervention_attributes.csv', ...
+            'hydrological_signatures.csv', ...
+            'landcover_attributes.csv', ...
+            'soil_attributes.csv', ...
             'topographic_attributes.csv'};
         for k=1:numel(metaFiles)
             copyfile(fullfile(payload,'01_metadata',metaFiles{k}), ...
@@ -10037,28 +11209,37 @@ function out = local_download_pe(cfg,stream,ui)
             copyfile(fullfile(payload,'02_attributes',attrFiles{k}), ...
                 fullfile(dirD,attrFiles{k}),'f');
         end
-        srcTS = fullfile(payload,'03_timeseries','by_catchment');
+        srcTS = fullfile(payload, ...
+            '03_timeseries','by_catchment');
         D = dir(fullfile(srcTS,'PE_*.csv'));
         if numel(D) < 136
             error('data_helpers:PEMissingTimeseries', ...
-                'Expected at least 136 CAMELS-PE files; found %d.',numel(D));
+                ['Expected at least 136 ' ...
+                'CAMELS-PE files; found %d.'],numel(D));
         end
         for k=1:numel(D)
             copyfile(fullfile(D(k).folder,D(k).name), ...
                 fullfile(dirTS,D(k).name),'f');
-            if ~isempty(d) && isvalid(d) && (mod(k,5)==0 || k==numel(D))
-                d.Message=sprintf('Installing CAMELS-PE files %d/%d ...',k,numel(D));
+            if ~isempty(d) ...
+                    && isvalid(d) ...
+                    && (mod(k,5) == 0 ...
+                    || k == numel(D))
+                d.Message=sprintf(['Installing ' ...
+                    'CAMELS-PE files %d/%d ...'],k,numel(D));
                 drawnow limitrate nocallbacks
             end
         end
         ok = local_pe_install_complete(dirD);
-        out = struct('ok',ok,'region','CAMELS_PE','dirD',dirD, ...
-            'dirM',dirTS,'dirQ',dirTS,'archive',zipFile,'unzipDir',unzipDir);
+        out = struct('ok',ok,'region', ...
+            'CAMELS_PE','dirD',dirD, ...
+            'dirM',dirTS,'dirQ',dirTS, ...
+            'archive',zipFile,'unzipDir',unzipDir);
         if ok
-            logFcn(sprintf('CAMELS-PE install finished: %d daily files.',numel(D)));
+            logFcn(sprintf(['CAMELS-PE install finished: ' ...
+                '%d daily files.'],numel(D)));
             local_cleanup_download_file(zipFile,logFcn);
             local_cleanup_download_folder(unzipDir,logFcn);
-            out.archive=''; out.unzipDir='';
+            out.archive = ''; out.unzipDir = '';
         end
     catch ME
         logFcn('CAMELS-PE install failed:'); logFcn(ME.message);
@@ -10901,9 +12082,21 @@ function local_download_file_nz(url,targetFile,label, ...
     ok = false;
     msg = '';
 
-    % First try PowerShell/.NET. This avoids Windows curl schannel
-    % revocation failures and follows Figshare redirects.
-    if ispc
+    % First use the shared progress-aware downloader. It handles Figshare
+    % directly on most systems and reports exact bytes when available.
+    try
+        local_download_file(url,targetFile,label, ...
+            d,cancelFcn,progressFcn,logFcn);
+        ok = local_accept_nz_download_variant(targetFile,logFcn);
+    catch ME
+        if strcmp(ME.identifier,'data_helpers:DownloadCanceled')
+            rethrow(ME);
+        end
+        msg = ['generic: ' ME.message];
+    end
+
+    % Retain the Windows PowerShell/.NET path as a certificate fallback.
+    if ~ok && ispc
         try
             psUrl = local_ps_quote(url);
             psOut = local_ps_quote(targetFile);
@@ -10927,18 +12120,6 @@ function local_download_file_nz(url,targetFile,label, ...
             end
         catch ME
             msg = ['powershell/.NET: ' ME.message];
-        end
-    end
-
-    % Second try generic downloader, but with browser fallback disabled by
-    % catching failures here.  This is mostly useful on Mac/Linux.
-    if ~ok
-        try
-            local_download_file(url,targetFile,label, ...
-                d,cancelFcn,progressFcn,logFcn);
-            ok = local_accept_nz_download_variant(targetFile,logFcn);
-        catch ME
-            msg = [msg ' | generic: ' ME.message];
         end
     end
 
@@ -11742,7 +12923,7 @@ function tf = local_br_needs_download(dirD,f)
     
         case 'streamflow'
             tf = ~local_br_component_ok(dirD, ...
-                'streamflow',897);
+                'streamflow',685);
     
         case 'precipitation'
             tf = ~local_br_component_ok(dirD, ...
@@ -11770,20 +12951,6 @@ function tf = local_br_should_install(files,key)
         && isfield(files,'install') ...
         && files(idx).install;
 
-end
-
-function local_websave(dst,url)
-
-    try
-        websave(dst,url);
-    catch ME
-        error('data_helpers:CAMELS_SE_downloadFailed', ...
-            ['Could not download ' ...
-            'CAMELS-SE file:\n%s\n\n' ...
-             'MATLAB error:\n%s'], ...
-             url,ME.message);
-    end
-    
 end
 
 function local_reset_dir(d)
@@ -11888,6 +13055,12 @@ function out = local_ensure_natural_earth_map(cfg,varargin)
         return
     end
 
+    [packaged10,~] = local_find_packaged_shape(packagedRoots,name10);
+    if ~isempty(packaged10)
+        out = local_map_result(true,packaged10,'10m',false,'');
+        return
+    end
+
     [file50,dir50] = local_find_packaged_shape( ...
         packagedRoots,name50);
 
@@ -11967,9 +13140,17 @@ function out = local_natural_earth_map_status(cfg)
         return
     end
 
+    packagedRoots = local_packaged_map_roots(cfg);
+    [file10,~] = local_find_packaged_shape( ...
+        packagedRoots,name10);
+    if ~isempty(file10)
+        out = local_map_result(true,file10,'10m',false,'');
+        return
+    end
+
     name50 = 'ne_50m_admin_0_countries';
     [file50,dir50] = local_find_packaged_shape( ...
-        local_packaged_map_roots(cfg),name50);
+        packagedRoots,name50);
     if ~isempty(file50) ...
             && local_shape_complete(dir50,name50)
         out = local_map_result(true,file50,'50m',false,'');
@@ -12033,7 +13214,11 @@ function [file,folder] = local_find_packaged_shape(roots,name)
     folder = '';
     for i = 1:numel(roots)
         root = char(roots(i));
-        candidates = {fullfile(root,'50'),root};
+        if startsWith(name,'ne_10m_')
+            candidates = {fullfile(root,'10'),root};
+        else
+            candidates = {fullfile(root,'50'),root};
+        end
         for j = 1:numel(candidates)
             if local_shape_complete(candidates{j},name)
                 folder = candidates{j};
@@ -12112,6 +13297,8 @@ function out = local_download_ush(cfg,stream,ui)
     end
     local_mkdir(dirD); stage = fullfile(dirD,'_camelsh_install');
     local_mkdir(stage); d = [];
+    userCanceled = false;
+    lastUI = tic;
     try
         d=local_progress_dialog(ui,'Installing CAMELSH-US', ...
             'Looking for existing downloads ...');
@@ -12123,7 +13310,8 @@ function out = local_download_ush(cfg,stream,ui)
                 && local_count_files(srcAttr,{'*.csv'})>=28)
             a = local_ush_archive(dl,stage,'attributes.7z', ...
                 'https://zenodo.org/records/15066778/files/attributes.7z?download=1', ...
-                'CAMELSH-US attributes',d,logFcn);
+                'CAMELSH-US attributes',d,@() userCanceled, ...
+                @ui_progress,logFcn);
             ex = fullfile(stage,'attributes_extract'); 
             local_7z_extract(a,ex);
             srcAttr = local_find_ush_dir(ex, ...
@@ -12133,7 +13321,8 @@ function out = local_download_ush(cfg,stream,ui)
                 && local_count_files(srcTS,{'*.nc'})>=3166)
             a = local_ush_archive(dl,stage,'timeseries.7z', ...
                 'https://zenodo.org/records/15066778/files/timeseries.7z?download=1', ...
-                'CAMELSH-US observed time series',d,logFcn);
+                'CAMELSH-US observed time series',d,@() userCanceled, ...
+                @ui_progress,logFcn);
             ex = fullfile(stage,'timeseries_extract'); 
             local_7z_extract(a,ex);
             srcTS = local_find_ush_dir(ex,'*.nc');
@@ -12143,7 +13332,7 @@ function out = local_download_ush(cfg,stream,ui)
             local_download_file_retry( ...
                 'https://zenodo.org/records/15066778/files/info.csv?download=1', ...
                 srcInfo,'CAMELSH-US availability table', ...
-                d,@()false,[],logFcn);
+                d,@() userCanceled,@ui_progress,logFcn);
         end
         dstAttr=fullfile(dirD,'attributes'); 
         dstTS = fullfile(dirD,'hourly','timeseries');
@@ -12189,23 +13378,920 @@ function out = local_download_ush(cfg,stream,ui)
         logFcn(['CAMELSH-US install failed: ' ME.message]);
         out = struct('ok',false,'reason',ME.message);
     end
+
+    function ui_progress(info)
+        [userCanceled,lastUI] = local_update_progress_dialog( ...
+            d,info,lastUI,userCanceled);
+    end
 end
 
-function a = local_ush_archive(downloads,stage,name,url,label,d,logFcn)
+function a = local_ush_archive(downloads,stage,name,url,label,d, ...
+    cancelFcn,progressFcn,logFcn)
     a=fullfile(downloads,name);
-    if ~isfile(a), a=fullfile(stage,name); local_download_file_retry(url,a,label,d,@()false,[],logFcn); end
+    if ~isfile(a)
+        a=fullfile(stage,name);
+        local_download_file_retry(url,a,label,d, ...
+            cancelFcn,progressFcn,logFcn);
+    end
 end
 function local_7z_extract(archive,dst)
-    local_mkdir(dst); c={fullfile(getenv('ProgramFiles'),'7-Zip','7z.exe'), ...
+    local_mkdir(dst); 
+    c = {fullfile(getenv('ProgramFiles'),'7-Zip','7z.exe'), ...
         fullfile(getenv('ProgramFiles'),'AMD','CIM','Bin64','7z.exe'), ...
-        fullfile(getenv('ProgramFiles'),'AMD','AMDInstallManager','7z.exe')}; exe='';
-    for i=1:numel(c), if isfile(c{i}), exe=c{i}; break; end, end
-    if isempty(exe), error('data_helpers:Missing7zip','7-Zip is required to extract CAMELSH-US archives.'); end
-    cmd=sprintf('"%s" x -y -o"%s" "%s"',exe,dst,archive); [s,msg]=system(cmd);
-    if s~=0, error('data_helpers:USHExtract','7-Zip extraction failed: %s',msg); end
+        fullfile(getenv('ProgramFiles'),'AMD', ...
+        'AMDInstallManager','7z.exe')}; exe = '';
+    for i = 1:numel(c)
+        if isfile(c{i})
+            exe=c{i}; 
+            break; 
+        end
+    end
+    if isempty(exe)
+        error('data_helpers:Missing7zip', ...
+            '7-Zip is required to extract CAMELSH-US archives.'); 
+    end
+    cmd = sprintf('"%s" x -y -o"%s" "%s"',exe,dst,archive); 
+    [s,msg] = system(cmd);
+    if s~=0
+        error('data_helpers:USHExtract', ...
+            '7-Zip extraction failed: %s',msg); 
+    end
 end
-function d=local_find_ush_dir(root,pattern)
-    q=dir(fullfile(root,'**',pattern)); q=q(~[q.isdir]);
-    if isempty(q), error('data_helpers:USHPayload','Could not find %s below %s.',pattern,root); end
-    d=q(1).folder;
+function d = local_find_ush_dir(root,pattern)
+    q = dir(fullfile(root,'**',pattern)); q = q(~[q.isdir]);
+    if isempty(q)
+        error('data_helpers:USHPayload', ...
+            'Could not find %s below %s.',pattern,root); 
+    end
+    d = q(1).folder;
+end
+
+function out = local_download_ru(cfg,stream,ui)
+% Download and install HydroCIS v1.3 daily data for 1,886 Russian gauges.
+    if ~strcmp(stream,'daily')
+        error('data_helpers:RUBadStream', ...
+            'HydroCIS Russia supports daily data only.');
+    end
+    dirD=local_cfg_dirD(cfg,'HYDRO_CIS');
+    dirT=fullfile(dirD,'daily','timeseries');
+    out=struct('ok',false,'region','HYDRO_CIS','dirD',dirD, ...
+        'dirM',dirT,'dirQ',dirT);
+    if local_ru_install('status',dirD)
+        out.ok = true; 
+        return; 
+    end
+    if ~local_ui_confirm(ui,'Download Russia HydroCIS data', ...
+            sprintf(['Download the official HydroCIS v1.3 archive (3.50 GB) ' ...
+            'and install daily forcing, observed discharge, geometries, ' ...
+            'and catchment attributes for 1,886 Russian gauges?\n\n' ...
+            'Extraction and validation require approximately 12 GB of ' ...
+            'temporary free disk space. The verified source archive will ' ...
+            'remain in Downloads.']))
+        out.canceled = true; 
+        return
+    end
+    logFcn = local_ui_log(ui);
+    userCanceled = false; lastUI = tic;
+    d=local_progress_dialog(ui,'Downloading Russia HydroCIS', ...
+        'Starting 3.50-GB HydroCIS v1.3 download ...');
+    cleanupDialog = onCleanup(@()local_close_progress(d));
+    archive = fullfile(local_default_download_dir(), ...
+        'Russia_HydroMeteo_Database_v04.zip');
+    archiveBytes = 3504912123;
+    checksum = '8d536a7b76d8fdd6004e321db03f4220';
+    archiveUrl = ['https://zenodo.org/api/records/8432070/files/' ...
+        'Russia_HydroMeteo_Database_v04.zip/content'];
+    try
+        if isfile(archive)
+            fileInfo = dir(archive);
+            if fileInfo.bytes == archiveBytes
+                % The common verification below handles complete archives.
+            elseif fileInfo.bytes < archiveBytes
+                logFcn(sprintf(['Found a partial HydroCIS archive: ' ...
+                    '%.3f of %.3f GB. Resuming at byte %d ...'], ...
+                    fileInfo.bytes/1e9,archiveBytes/1e9, ...
+                    fileInfo.bytes));
+                local_download_file_range_resume(archiveUrl,archive, ...
+                    archiveBytes,'HydroCIS v1.3',d, ...
+                    @()userCanceled,@progress,logFcn);
+            else
+                error('data_helpers:RUArchiveTooLarge', ...
+                    ['The existing HydroCIS archive is larger than the ' ...
+                    'official file (%d versus %d bytes). It was left ' ...
+                    'unchanged; move or rename it before retrying.'], ...
+                    fileInfo.bytes,archiveBytes);
+            end
+        end
+        if ~isfile(archive)
+            % Create an empty destination so the range downloader can
+            % preserve every completed chunk and resume after interruption.
+            fid=fopen(archive,'wb');
+            if fid < 0
+                error('data_helpers:RUArchiveCreate', ...
+                    'Could not create the HydroCIS archive: %s',archive);
+            end
+            fclose(fid);
+            local_download_file_range_resume(archiveUrl,archive, ...
+                archiveBytes,'HydroCIS v1.3',d,@()userCanceled, ...
+                @progress,logFcn);
+        end
+        local_verify_md5(archive,checksum,logFcn);
+        if userCanceled
+            out.canceled = true; 
+            return; 
+        end
+        % Extract outside the synchronized data tree. Dropbox can retain
+        % empty directory placeholders after a failed extraction, whereas
+        % the system temporary directory can be removed reliably.
+        stage = tempname;
+        mkdir(stage);
+        cleanupStage = onCleanup( ...
+            @()local_cleanup_ru_stage(stage,logFcn));
+        logFcn(['Extracting and ' ...
+            'validating the HydroCIS archive. ' ...
+            'This may take several minutes ...']);
+        unzip(archive,stage);
+        out.ok = local_ru_install('install',stage,dirD);
+        out.archive = archive;
+        logFcn(['Installed HydroCIS v1.3 ' ...
+            'daily Russia data: ' dirD]);
+        logFcn(['The verified 3.50-GB source ' ...
+            'archive remains at: ' archive]);
+    catch ME
+        out.error=ME.message;
+        logFcn(['HydroCIS Russia ' ...
+            'installation failed: ' ME.message]);
+    end
+    function progress(info)
+        [userCanceled,lastUI] = local_update_progress_dialog( ...
+            d,info,lastUI,userCanceled);
+    end
+end
+
+function local_cleanup_ru_stage(stage,logFcn)
+    if isempty(stage) ...
+            || ~isfolder(stage)
+        return;
+    end
+    message = '';
+    for attempt = 1:8
+        [removed,message] = rmdir(stage,'s');
+        if removed
+            return; 
+        end
+        pause(0.25);
+    end
+    logFcn(['Could not remove temporary ' ...
+        'HydroCIS extraction folder: ' ...
+        stage '. ' message]);
+end
+
+function out=local_download_kr(cfg,stream,ui)
+% Daily CAMELS-KR v1.1. The hourly CAMELSH-KR installer is independent.
+    if ~strcmp(stream,'daily')
+        error('data_helpers:KRBadStream', ...
+            'CAMELS-KR supports daily data only.');
+    end
+    dirD = local_cfg_dirD(cfg,'CAMELS_KR');
+    dirM = fullfile(dirD,'daily','forcing');
+    dirQ = fullfile(dirD,'daily','discharge');
+    out = struct('ok',false,'region', ...
+        'CAMELS_KR','dirD',dirD,'dirM',dirM,'dirQ',dirQ);
+    if local_kr_install('status',dirD)
+        out.ok = true; 
+        return; 
+    end
+    if ~local_ui_confirm(ui,'Download CAMELS-KR daily data', ...
+            ['Download the official CAMELS-KR v1.1 archive (360 MB) ' ...
+            'and install daily forcing, observed discharge, and seven ' ...
+            'attribute tables for 282 catchments?'])
+        out.canceled = true; 
+        return
+    end
+    logFcn = local_ui_log(ui);
+    userCanceled = false; lastUI = tic;
+    d = local_progress_dialog(ui,'Downloading CAMELS-KR', ...
+        'Starting download ...');
+    cleanupDialog = onCleanup(@()local_close_progress(d));
+    archive = fullfile(local_default_download_dir(), ...
+        'CAMELS-KR-v1.1.zip');
+    checksum = '5ffce545fc0b3b79d57382a33dc597ca';
+    try
+        if isfile(archive)
+            try
+                local_verify_md5(archive,checksum,logFcn);
+            catch
+                delete(archive); 
+            end
+        end
+        if ~isfile(archive)
+            local_download_file_retry( ...
+                'https://zenodo.org/api/records/21930882/files/CAMELS-KR.zip/content', ...
+                archive,'CAMELS-KR v1.1',d,@()userCanceled,@progress,logFcn,3);
+        end
+        local_verify_md5(archive,checksum,logFcn);
+        if userCanceled
+            out.canceled = true; 
+            return; 
+        end
+        staging = tempname; 
+        mkdir(staging);
+        cleanupStage = onCleanup(@()rmdir(staging,'s'));
+        logFcn(['Extracting and validating ' ...
+            '282 daily CAMELS-KR catchments ...']);
+        unzip(archive,staging);
+        out.ok = local_kr_install('install', ...
+            fullfile(staging,'CAMELS-KR'),dirD);
+        out.archive = archive;
+        logFcn(['Installed CAMELS-KR daily data: ' dirD]);
+    catch ME
+        out.error = ME.message;
+        logFcn(['CAMELS-KR installation failed: ' ME.message]);
+    end
+    function progress(info)
+        [userCanceled,lastUI] = local_update_progress_dialog( ...
+            d,info,lastUI,userCanceled);
+    end
+end
+
+function out = local_download_et(cfg,stream,ui)
+%LOCAL_DOWNLOAD_ET Download and standardize daily CAMELS-Eth data.
+    logFcn = local_ui_log(ui); 
+    dirD = local_cfg_dirD(cfg,'CAMELS_ET');
+    if ~strcmpi(stream,'daily')
+        error('data_helpers:ETBadStream', ...
+            'CAMELS-Eth supports daily data only.'); 
+    end
+    if local_has_stream(cfg,'daily') ...
+            && local_has_metadata(cfg)
+        out=struct('ok',true,'region', ...
+            'CAMELS_ET','dirD',dirD,'skipped',true); 
+        return
+    end
+    msg=['The CAMELS-Eth provider asks users ' ...
+        'to register before downloading. ' ...
+        ['SAGE does not collect or store ' ...
+        'registration information.'] newline newline ...
+        'If needed, use the CAMELS-Eth link ' ...
+        'shown on the Region tab, register, ' ...
+        'then return here. Continue with ' ...
+        'the automatic installation?'];
+    if ~local_ui_confirm(ui,'Install Ethiopia data',msg)
+        out = struct('ok',false,'canceled',true); 
+        return
+    end
+    d = local_progress_dialog(ui, ...
+        'Installing Ethiopia data', ...
+        'Downloading physical attributes ...');
+    base = 'https://www.walris.wlrc-eth.org/camels-eth/'; 
+    api = [base 'api/public/'];
+    try
+        local_mkdir(dirD); 
+        tsDir = fullfile(dirD,'daily','timeseries'); 
+        local_mkdir(tsDir);
+        names={'CAMELS_ET_topographic_attributes.csv', ...
+            'CAMELS_ET_soil_attributes.csv', ...
+            'CAMELS_ET_landcover_attributes.csv'};
+        for i = 1:numel(names)
+            target = fullfile(dirD,names{i});
+            if ~isfile(target)
+                websave(target,[base 'downloads/' names{i}], ...
+                    weboptions('Timeout',120)); 
+            end
+        end
+        top = readtable(fullfile(dirD,names{1}), ...
+            'VariableNamingRule','preserve');
+        ids = upper(strtrim(string(top.gauge_id))); 
+        [ids,ord] = sort(ids); 
+        top = top(ord,:);
+        n = numel(ids); local_et_write_gauges(top,dirD);
+        writelines(ids,fullfile(dirD,'ET_83_basins.txt'));
+        failures=strings(0,1);
+        for i = 1:n
+            id = ids(i); target=fullfile(tsDir, ...
+                ['CAMELS_ET_' char(id) '.csv']);
+            if isfile(target) ...
+                    && dir(target).bytes>1000
+                continue
+            end
+            local_ca_set_progress(d,false,(i-1)/n, ...
+                sprintf('Preparing basin %d of %d: %s',i,n,id));
+            try
+                dates = (datetime(1981,1,1): ...
+                    days(1):datetime(2018,12,31))';
+                T = table(dates,'VariableNames',{'date'});
+                endpoints = {'chirps','chirts-tmin', ...
+                    'chirts-tmax','gleam-ep','runoff'};
+                vars = {'precipitation','tmin', ...
+                    'tmax','pet','runoff'};
+                for k = 1:numel(endpoints)
+                    A = local_et_series( ...
+                        [api endpoints{k} '?code=' char(id)]);
+                    values = nan(height(T),1); 
+                    [tf,loc] = ismember(A.date,T.date); 
+                    values(loc(tf)) = A.value(tf);
+                    T.(vars{k}) = values;
+                end
+                T.date = string(T.date,'yyyy-MM-dd'); 
+                writetable(T,target);
+            catch MEb
+                failures(end+1) = id; %#ok
+                logFcn(sprintf('CAMELS-Eth %s failed: %s', ...
+                    id,MEb.message));
+            end
+        end
+        local_ca_set_progress(d,false,1, ...
+            'Checking CAMELS-Eth installation ...');
+        ok=local_count_files(tsDir, ...
+            {'CAMELS_ET_*.csv'})>=n ...
+            && local_has_metadata(cfg);
+        if ~isempty(failures)
+            writelines(failures,fullfile(dirD, ...
+                'incomplete_basins.txt')); 
+        end
+        out = struct('ok',ok,'region', ...
+            'CAMELS_ET','dirD',dirD, ...
+            'basins',n,'failures',failures);
+        if ok
+            logFcn(sprintf(['CAMELS-Eth ' ...
+                'installation complete: %d basins.'],n));
+        else
+            logFcn(sprintf(['CAMELS-Eth ' ...
+                'installation incomplete; ' ...
+                'retry will resume. %d basin(s) failed.'], ...
+                numel(failures))); 
+        end
+    catch ME
+        out = struct('ok',false,'error',ME.message, ...
+            'region','CAMELS_ET','dirD',dirD); 
+        logFcn(ME.message);
+    end
+    local_close_progress(d);
+end
+
+function out = local_download_pt(cfg,stream,ui)
+%LOCAL_DOWNLOAD_PT Install EStreams forcing/attributes and SNIRH discharge.
+if ~strcmpi(stream,'daily')
+    error('data_helpers:PTBadStream','Portugal supports daily data only.');
+end
+logFcn=local_ui_log(ui); dirD=local_cfg_dirD(cfg,'EStreams_PT');
+if local_has_stream(cfg,'daily') && local_has_metadata(cfg)
+    out=struct('ok',true,'region','EStreams_PT','dirD',dirD,'skipped',true); return
+end
+msg=['Portugal combines EStreams meteorology and attributes with observed ' ...
+    'SNIRH discharge.' newline newline ...
+    'Before continuing, connect through a Portuguese IP address (or a ' ...
+    'Portugal VPN). SNIRH otherwise returns 403 Forbidden.' newline newline ...
+    'SAGE downloads only the 280 Portugal forcing files, not the full ' ...
+    '11.3 GB European meteorology archive. Continue?'];
+if ~local_ui_confirm(ui,'Install Portugal daily data',msg)
+    out=struct('ok',false,'canceled',true); return
+end
+d=local_progress_dialog(ui,'Installing Portugal data','Preparing resumable download ...');
+root = fileparts(fileparts(mfilename('fullpath')));
+regionDir = fullfile(root,'regions','PT');
+mapFile = fullfile(regionDir,'snirh_station_map.csv');
+stage=fullfile(local_default_download_dir(),'EStreams_PT_stage');
+source=fullfile(stage,'source');
+try
+    local_mkdir(source); local_mkdir(dirD);
+    base='https://zenodo.org/records/17598150/files/';
+    specs={ 'attributes.zip','attributes'; 'streamflow_gauges.zip','gauges'};
+    for j=1:size(specs,1)
+        z=fullfile(stage,specs{j,1}); dst=fullfile(source,'estreams',specs{j,2});
+        if ~isfolder(dst) || isempty(dir(fullfile(dst,'**','*.csv')))
+            local_ca_set_progress(d,false,0.02*j,['Downloading EStreams ' specs{j,2} ' ...']);
+            local_download_file_retry([base specs{j,1} '?download=1'],z, ...
+                ['EStreams ' specs{j,2}],d,@()false,[],logFcn,3);
+            local_mkdir(dst); unzip(z,dst);
+        end
+    end
+    metRoot=fullfile(source,'estreams','portugal');
+    metDir=fullfile(metRoot,'meteorology'); local_mkdir(metDir);
+    metUrl=[base 'meteorology.zip?download=1'];
+    local_ca_set_progress(d,false,0.08,'Reading the remote EStreams archive ...');
+    C=local_pt_remote_zip('list',metUrl); names=string({C.name});
+    keep=startsWith(names,'meteorology/estreams_meteorology_PT') ...
+        & endsWith(names,'.csv') & ~contains(names,'__MACOSX');
+    names=names(keep); assert(numel(names)==280,'EStreams_PT:EStreamsInventory', ...
+        'Expected 280 Portugal meteorology files; remote archive contains %d.',numel(names));
+    for i=1:numel(names)
+        [~,nm,ext]=fileparts(names(i)); target=fullfile(metDir,char(nm+ext));
+        if ~isfile(target) || dir(target).bytes<1000
+            local_pt_remote_zip('extract',metUrl,names(i),metRoot);
+        end
+        local_ca_set_progress(d,false,0.08+0.44*i/numel(names), ...
+            sprintf('Portugal forcing %d of %d',i,numel(names)));
+    end
+    M=readtable(mapFile,'TextType','string'); snDir=fullfile(source,'snirh'); local_mkdir(snDir);
+    opt=weboptions('Timeout',180,'HeaderFields',{'User-Agent' ...
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) SAGEhydrology'});
+    for i=1:height(M)
+        target=fullfile(snDir,replace(M.gauge_id(i),'/','_')+'.csv');
+        if ~isfile(target) || dir(target).bytes<100
+            url=sprintf(['https://snirh.apambiente.pt/snirh/_dadosbase/site/' ...
+                'paraCSV/dados_csv.php?sites=%s&pars=1850&tmin=01/01/1972&' ...
+                'tmax=31/12/2022&formato=csv'],char(string(M.gauge_code(i))));
+            try
+                websave(target,url,opt);
+            catch MEq
+                if contains(MEq.message,'403') || contains(lower(MEq.message),'forbidden')
+                    error('EStreams_PT:PortugueseIPRequired', ...
+                        ['SNIRH returned 403 Forbidden. Connect to a Portuguese ' ...
+                         'IP address or Portugal VPN, then click Install daily data again.']);
+                end
+                rethrow(MEq)
+            end
+        end
+        local_ca_set_progress(d,false,0.52+0.34*i/height(M), ...
+            sprintf('SNIRH discharge %d of %d',i,height(M)));
+    end
+    local_ca_set_progress(d,false,0.88,'Standardizing Portugal basin files ...');
+    report=local_prepare_estreams_pt(source,dirD,mapFile, ...
+        @(i,n,id) local_ca_set_progress(d,false,0.88+0.11*i/n, ...
+        sprintf('Preparing basin %d of %d: %s',i,n,id)));
+    ok=report.ok && local_has_stream(cfg,'daily') && local_has_metadata(cfg);
+    assert(ok,'EStreams_PT:InstallIncomplete','Portugal installation validation failed.');
+    local_ca_set_progress(d,false,1,'Portugal installation complete.');
+    logFcn(sprintf(['Portugal installation complete: %d basins; ' ...
+        '%d reproduce the independent QA population.'], ...
+        report.installed_basins,report.qa_accepted_basins));
+    out=report; out.region='EStreams_PT'; out.dirD=dirD;
+catch ME
+    logFcn(['Portugal installation failed: ' ME.message]);
+    out=struct('ok',false,'region','EStreams_PT','dirD',dirD,'error',ME.message);
+end
+local_close_progress(d);
+end
+
+function T=local_et_series(url)
+    last = '';
+    for attempt = 1:3
+        try
+            J = webread(url,weboptions('Timeout',180)); 
+            rows = local_et_embedded(J);
+            if isempty(rows)
+                T = table(datetime.empty(0,1),zeros(0,1), ...
+                    'VariableNames',{'date','value'}); 
+                return
+            end
+            dates = datetime(string({rows.date})', ...
+                'InputFormat','yyyy-MM-dd HH:mm:ss');
+            vals = local_et_values(rows);
+            T = table(dates,vals,'VariableNames', ...
+                {'date','value'}); 
+            T = sortrows(T,'date'); 
+            return
+        catch ME
+            last = ME.message; 
+            pause(min(attempt,3)); 
+        end
+    end
+    error('data_helpers:ETApi', ...
+        ['CAMELS-Eth API request failed ' ...
+        'after three attempts: %s'],last);
+end
+
+function values = local_et_values(rows)
+    values = nan(numel(rows),1);
+    for i = 1:numel(rows)
+        value = rows(i).value;
+        if isempty(value)
+            continue
+        end
+        if isnumeric(value) ...
+                || islogical(value)
+            if isscalar(value)
+                values(i) = double(value); 
+            end
+        else
+            parsed = str2double(string(value));
+            if isscalar(parsed)
+                values(i) = parsed; 
+            end
+        end
+    end
+end
+function rows = local_et_embedded(J)
+    rows = []; 
+    f = fieldnames(J); 
+    j = find(contains(lower(f),'embedded'),1);
+    if isempty(j)
+        error('data_helpers:ETApiFormat', ...
+            'CAMELS-Eth response has no embedded data.'); 
+    end
+    E = J.(f{j}); g = fieldnames(E); 
+    g = g(~contains(lower(g),'link'));
+    if ~isempty(g)
+        rows=E.(g{1}); 
+    end
+end
+
+function local_et_write_gauges(T,dirD)
+    gauge_id = upper(strtrim(string(T.gauge_id))); 
+    gauge_name = string(T.gauge_name);
+    gauge_lat = double(T.gauge_lat); 
+    gauge_lon = double(T.gauge_lon);
+    gauge_elev = double(T.gauge_elev); 
+    area_km2 = double(T.area);
+    G=table(gauge_id,gauge_name,gauge_lat, ...
+        gauge_lon,gauge_elev,area_km2);
+    writetable(G,fullfile(dirD, ...
+        'gauge_information.txt'),'Delimiter', ...
+        '\t','FileType','text','Encoding','UTF-8');
+end
+
+function out = local_pt_remote_zip(action,url,varargin)
+%REMOTE_ZIP_HELPERS List or selectively extract files from a remote ZIP.
+% Uses HTTP byte ranges, including ZIP64 archives, so large archives do not
+% need to be downloaded in full.
+    switch lower(char(action))
+        case 'list'
+            out = local_pt_zip_catalog(url);
+        case 'extract'
+            names = string(varargin{1}); 
+            target = char(varargin{2});
+            C = local_pt_zip_catalog(url); 
+            out = strings(numel(names),1);
+            for i = 1:numel(names)
+                k = find(strcmp(string({C.name}),names(i)),1);
+                assert(~isempty(k),'remote_zip:MissingEntry', ...
+                    'ZIP entry not found: %s',names(i));
+                out(i) = string(local_pt_zip_extract(url,C(k),target));
+            end
+        otherwise
+            error('remote_zip:BadAction', ...
+                'Unknown action: %s',action);
+    end
+end
+
+function C = local_pt_zip_catalog(url)
+    [tail,total,tailStart] = local_pt_zip_tail(url,131072);
+    sig = uint8([80 75 5 6]); 
+    p = local_pt_zip_last_signature(tail,sig);
+    assert(~isempty(p),'remote_zip:EOCD', ...
+        'Remote file is not a readable ZIP archive.');
+    e = tail(p:end); 
+    n = double(local_pt_zip_u16(e,11)); 
+    cdSize = double(local_pt_zip_u32(e,13));  
+    cdOff = double(local_pt_zip_u32(e,17));
+    if n == 65535 ...
+            || cdSize == 4294967295 ...
+            || cdOff == 4294967295
+        lp = local_pt_zip_last_signature(tail(1:p-1),uint8([80 75 6 7]));
+        assert(~isempty(lp), ...
+            'remote_zip:ZIP64Locator', ...
+            'ZIP64 locator is missing.');
+        zoff = double(local_pt_zip_u64(tail,lp+8)); 
+        z = local_pt_zip_range(url,zoff,zoff+55);
+        n = double(local_pt_zip_u64(z,33)); 
+        cdSize = double(local_pt_zip_u64(z,41)); 
+        cdOff = double(local_pt_zip_u64(z,49));
+    end
+    assert(cdOff + cdSize <= total, ...
+        'remote_zip:Bounds', ...
+        'Invalid central-directory bounds.');
+    if cdOff>=tailStart ...
+            && cdOff+cdSize<=total
+        a = cdOff - tailStart + 1; D = tail(a:a+cdSize-1);
+    else
+        D = local_pt_zip_range(url,cdOff,cdOff+cdSize-1);
+    end
+    C = repmat(struct('name','', ...
+        'method',0, ...
+        'compressed',0, ...
+        'uncompressed',0, ...
+        'offset',0),max(n,1),1);
+    pos = 1; count = 0;
+    while pos + 45 <= numel(D) ...
+            && isequal(D(pos:pos+3),uint8([80 75 1 2])')
+        count = count+1; 
+        method = double(local_pt_zip_u16(D,pos+10));
+        cs = double(local_pt_zip_u32(D,pos+20)); 
+        us = double(local_pt_zip_u32(D,pos+24));
+        nl = double(local_pt_zip_u16(D,pos+28)); 
+        xl = double(local_pt_zip_u16(D,pos+30)); 
+        cl = double(local_pt_zip_u16(D,pos+32));
+        off = double(local_pt_zip_u32(D,pos+42)); 
+        name = char(D(pos+46:pos+45+nl))';
+        extra = D(pos+46+nl:pos+45+nl+xl);
+        [us,cs,off] = local_pt_zip64(extra,us,cs,off);
+        C(count) = struct('name',name, ...
+            'method',method, ...
+            'compressed',cs, ...
+            'uncompressed',us, ...
+            'offset',off);
+        pos = pos + 46 + nl + xl + cl;
+    end
+    C = C(1:count);
+end
+
+function file=local_pt_zip_extract(url,E,target)
+    h = local_pt_zip_range(url,E.offset,E.offset+29);
+    assert(isequal(h(1:4),uint8([80 75 3 4])'), ...
+        'remote_zip:LocalHeader', ...
+        'Invalid local ZIP header.');
+    nl = double(local_pt_zip_u16(h,27)); 
+    xl = double(local_pt_zip_u16(h,29)); 
+    start = E.offset+30+nl+xl;
+    b=local_pt_zip_range(url,start,start+E.compressed-1);
+    if E.method == 0
+        raw = b;
+    elseif E.method == 8
+        raw = local_pt_zip_inflate(b);
+    else
+        error('remote_zip:Method', ...
+            'Unsupported ZIP compression method %d.',E.method);
+    end
+    assert(numel(raw) == E.uncompressed, ...
+        'remote_zip:Length', ...
+        'Extracted length mismatch for %s.',E.name);
+    parts = strsplit(strrep(E.name,'\','/'),'/'); 
+    file = fullfile(target,parts{:});
+    folder = fileparts(file); 
+    if ~isfolder(folder)
+        mkdir(folder); 
+    end
+    fid = fopen(file,'w'); 
+    assert(fid>=0,'remote_zip:Write', ...
+        'Cannot create %s.',file);
+    cleanup = onCleanup(@() fclose(fid)); 
+    fwrite(fid,raw,'uint8'); 
+    clear cleanup
+end
+
+function raw=local_pt_zip_inflate(b)
+    tmp = tempname; 
+    fid = fopen(tmp,'w'); 
+    fwrite(fid,b,'uint8'); 
+    fclose(fid);
+    cleanup = onCleanup(@() local_pt_zip_delete(tmp));
+    in = java.io.FileInputStream(tmp); 
+    inf = java.util.zip.Inflater(true);
+    zin = java.util.zip.InflaterInputStream(in,inf); 
+    baos = java.io.ByteArrayOutputStream();
+    buf = zeros(1,65536,'int8');
+    while true
+        m = zin.read(buf,0,numel(buf)); 
+        if m < 0
+            break
+        end
+        baos.write(buf,0,m);
+    end
+    zin.close(); 
+    raw = typecast(baos.toByteArray(),'uint8'); 
+    raw = raw(:);
+    clear cleanup
+end
+
+function local_pt_zip_delete(f)
+    if isfile(f)
+        delete(f); 
+    end
+end
+
+function [b,total,start] = local_pt_zip_tail(url,n)
+    [b,headers] = local_pt_zip_request(url,sprintf('bytes=-%d',n));
+    cr = char(headers); 
+    tok = regexp(cr, ...
+        '(?i)content-range:\s*bytes\s+(\d+)-(\d+)/(\d+)', ...
+        'tokens','once');
+    assert(~isempty(tok),'remote_zip:Ranges', ...
+        'Server did not return a Content-Range header.');
+    start = str2double(tok{1}); 
+    total = str2double(tok{3});
+end
+
+function b = local_pt_zip_range(url,a,z)
+    [b,~] = local_pt_zip_request(url,sprintf('bytes=%d-%d',a,z));
+end
+
+function [b,headers]=local_pt_zip_request(url,range)
+    import matlab.net.http.*
+    fields = [HeaderField('Range',range) ...
+        HeaderField('User-Agent','SAGEhydrology')];
+    req = RequestMessage('GET',fields);
+    opt = HTTPOptions('ConnectTimeout',30, ...
+        'ResponseTimeout',180, ...
+        'ConvertResponse',false);
+    r = req.send(url,opt); 
+    assert(any(double(r.StatusCode)==[200 206]), ...
+        'remote_zip:HTTP','HTTP %s for %s.', ...
+        char(r.StatusLine),url);
+    b = uint8(r.Body.Data); 
+    b = b(:); 
+    headers = char(r.Header);
+end
+
+function p = local_pt_zip_last_signature(b,s)
+    p = []; 
+    for i = numel(b) - numel(s) + 1:-1:1
+        if isequal(b(i:i+numel(s)-1),s(:))
+            p = i; 
+            return
+        end
+    end
+end
+function v = local_pt_zip_u16(b,p)
+    v = uint16(b(p)) + bitshift(uint16(b(p+1)),8); 
+end
+
+function v = local_pt_zip_u32(b,p)
+    v = uint32(b(p)) + bitshift(uint32(b(p+1)),8) + ...
+        bitshift(uint32(b(p+2)),16) + bitshift(uint32(b(p+3)),24); 
+end
+
+function v=local_pt_zip_u64(b,p)
+    v = uint64(0); 
+    for k = 0:7
+        v = v + bitshift(uint64(b(p+k)),8*k);
+    end
+end
+
+function [us,cs,off]=local_pt_zip64(x,us,cs,off)
+    p = 1; 
+    while p + 3 <= numel(x)
+        id = local_pt_zip_u16(x,p); 
+        n = double(local_pt_zip_u16(x,p+2)); 
+        q = p + 4;
+        if id == 1
+            if us == 4294967295
+                us = double(local_pt_zip_u64(x,q));
+                q = q + 8; 
+            end
+            if cs == 4294967295
+                cs = double(local_pt_zip_u64(x,q));
+                q = q + 8;
+            end
+            if off==4294967295
+                off = double(local_pt_zip_u64(x,q)); 
+            end
+            return
+        end
+        p = q + n;
+    end
+end
+
+function report = local_prepare_estreams_pt(sourceRoot,installRoot, ...
+        stationMapFile,progressFcn)
+%PREPARE_ESTREAMS_PT Standardize all 280 Portugal basins for SAGE.
+
+    if nargin < 4 || isempty(progressFcn)
+        progressFcn = @(varargin) [];
+    end
+    metDir = fullfile(sourceRoot,'estreams','portugal','meteorology');
+    snirhDir = fullfile(sourceRoot,'snirh');
+    attrDir = fullfile(sourceRoot,'estreams','attributes', ...
+        'attributes','static_attributes');
+    gaugeFile = fullfile(sourceRoot,'estreams','gauges', ...
+        'streamflow_gauges','estreams_gauging_stations.csv');
+    assert(isfolder(metDir) && isfolder(snirhDir) ...
+        && isfile(gaugeFile),'EStreams_PT:MissingSource', ...
+        'Portugal source files are incomplete.');
+
+    M = readtable(stationMapFile,'TextType','string', ...
+        'VariableNamingRule','preserve');
+    G = readtable(gaugeFile,'TextType','string', ...
+        'VariableNamingRule','preserve');
+    G = G(strcmpi(strtrim(string(G.gauge_country)),'PT'),:);
+    assert(height(M) == 280 && height(G) == 280, ...
+        'EStreams_PT:MappingCount', ...
+        'Expected 280 Portugal station and EStreams records.');
+    assert(all(sort(string(M.basin_id)) == sort(string(G.basin_id))), ...
+        'EStreams_PT:MappingIDs', ...
+        'Station map and EStreams basin IDs differ.');
+
+    tsDir = fullfile(installRoot,'daily','timeseries');
+    if ~isfolder(tsDir)
+        mkdir(tsDir);
+    end
+    allBasins = string(M.basin_id);
+    qaAccepted = strings(0,1);
+    validDays = zeros(height(M),1);
+    commonDays = zeros(height(M),1);
+    runoffRatio = nan(height(M),1);
+    sourcePairAvailable = false(height(M),1);
+
+    for i = 1:height(M)
+        id = string(M.basin_id(i));
+        fm = fullfile(metDir, ...
+            "estreams_meteorology_" + id + ".csv");
+        fq = fullfile(snirhDir, ...
+            replace(string(M.gauge_id(i)),'/','_') + ".csv");
+        assert(isfile(fm),'EStreams_PT:MissingMeteorology', ...
+            'Missing EStreams meteorology for basin %s.',id);
+        T = readtable(fm,'TextType','string', ...
+            'VariableNamingRule','preserve');
+        T.date = datetime(string(T.date),'InputFormat','yyyy-MM-dd');
+        if isfile(fq)
+            Q = local_pt_read_q(fq);
+            sourcePairAvailable(i) = true;
+        else
+            Q = table(datetime.empty(0,1),zeros(0,1), ...
+                'VariableNames',{'date','q_cms_obs'});
+        end
+        [tf,loc] = ismember(T.date,Q.date);
+        T.q_cms_obs = nan(height(T),1);
+        T.q_cms_obs(tf) = Q.q_cms_obs(loc(tf));
+        validDays(i) = sum(isfinite(T.q_cms_obs) ...
+            & T.q_cms_obs >= 0);
+        common = T.date >= datetime(1990,10,1) ...
+            & T.date <= datetime(2020,9,30) ...
+            & isfinite(T.q_cms_obs) & T.q_cms_obs >= 0;
+        commonDays(i) = sum(common);
+        kg = find(string(G.basin_id) == id,1);
+        areaKm2 = double(G.area_estreams(kg));
+        paired = isfinite(T.q_cms_obs) & T.q_cms_obs >= 0 ...
+            & isfinite(T.p_mean) & T.p_mean >= 0;
+        if any(paired)
+            qDepth = mean(T.q_cms_obs(paired)) * 86400 ...
+                / (areaKm2 * 1e6) * 1000;
+            runoffRatio(i) = qDepth / mean(T.p_mean(paired));
+        end
+
+        % This independently reproduced population is QA provenance only.
+        % SAGE receives and screens all 280 basins at run time.
+        if commonDays(i) >= 1825 ...
+                && isfinite(runoffRatio(i)) ...
+                && runoffRatio(i) <= 2
+            qaAccepted(end + 1,1) = id; %#ok<AGROW>
+        end
+        T.date = string(T.date,'yyyy-MM-dd');
+        writetable(T,fullfile(tsDir, ...
+            "EStreams_PT_" + id + ".csv"));
+        progressFcn(i,height(M),char(id));
+    end
+
+    assert(numel(qaAccepted) == 133,'EStreams_PT:QAInventory', ...
+        'Expected 133 QA-accepted basins; reproduced %d.', ...
+        numel(qaAccepted));
+    writelines(allBasins, ...
+        fullfile(installRoot,'PT_280_basins.txt'));
+    writelines(qaAccepted, ...
+        fullfile(installRoot,'PT_133_QA_basins.txt'));
+    local_pt_write_subset(G,allBasins,fullfile(installRoot, ...
+        'estreams_gauging_stations_PT.csv'));
+
+    A = dir(fullfile(attrDir,'estreams_*_attributes.csv'));
+    A2 = dir(fullfile(attrDir,'estreams_meteorology_density.csv'));
+    A = [A;A2];
+    for i = 1:numel(A)
+        T = readtable(fullfile(A(i).folder,A(i).name), ...
+            'TextType','string','VariableNamingRule','preserve');
+        target = fullfile(installRoot, ...
+            replace(A(i).name,'.csv','_PT.csv'));
+        local_pt_write_subset(T,allBasins,target);
+    end
+
+    qaAcceptedFlag = ismember(allBasins,qaAccepted);
+    coverage = table(allBasins,string(M.gauge_id), ...
+        sourcePairAvailable,validDays,commonDays, ...
+        runoffRatio,qaAcceptedFlag, ...
+        'VariableNames',{'basin_id','gauge_id', ...
+        'source_pair_available','valid_q_days','common_q_days', ...
+        'runoff_precip_ratio', ...
+        'qa_accepted'});
+    writetable(coverage, ...
+        fullfile(installRoot,'SNIRH_coverage.csv'));
+    report = struct('ok',true,'source_basins',height(M), ...
+        'installed_basins',numel(allBasins), ...
+        'qa_accepted_basins',numel(qaAccepted), ...
+        'qa_not_accepted_basins',height(M) - numel(qaAccepted), ...
+        'installRoot',installRoot);
+end
+
+function Q = local_pt_read_q(file)
+    Q = table(datetime.empty(0,1),zeros(0,1), ...
+        'VariableNames',{'date','q_cms_obs'});
+    try
+        A = readtable(file,'Delimiter',',','NumHeaderLines',3, ...
+            'ReadVariableNames',false,'TextType','string');
+        if width(A) < 2
+            return
+        end
+        date = datetime(string(A{:,1}), ...
+            'InputFormat','dd/MM/yyyy HH:mm');
+        discharge = str2double(replace(string(A{:,2}),',','.'));
+        good = ~isnat(date) & isfinite(discharge) & discharge >= 0;
+        date = date(good);
+        discharge = discharge(good);
+        [date,index] = unique(date,'stable');
+        discharge = discharge(index);
+        Q = table(date,discharge, ...
+            'VariableNames',{'date','q_cms_obs'});
+    catch
+    end
+end
+
+function local_pt_write_subset(T,ids,target)
+    names = string(T.Properties.VariableNames);
+    index = find(strcmpi(names,'basin_id'),1);
+    assert(~isempty(index),'EStreams_PT:MissingBasinID', ...
+        '%s has no basin_id column.',target);
+    tableIds = upper(strtrim(string(T{:,index})));
+    T = T(ismember(tableIds,upper(ids)),:);
+    assert(height(T) == numel(ids),'EStreams_PT:AttributeInventory', ...
+        '%s contains %d of %d Portugal basins.', ...
+        target,height(T),numel(ids));
+    writetable(T,target);
 end

@@ -1,33 +1,21 @@
 function write_header(mdl,part)
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%WRITE_HEADER Write SAGE header
+%WRITE_HEADER Print the selected model and training banner.
+%
+%  Writes the command-window heading for SITE or SAGE training.
 %
 % SYNOPSIS:
-%   flag = write_header(mdl,part)
+%   write_header(mdl)
+%   write_header(mdl,part)
 %
-% INPUT:
-%   mdl         structure with model selection/settings
-%    .model      choice of model
-%                 1 hymod
-%                 2 hmodel
-%                 3 sacsma
-%                 4 xinanjiang
-%                 5 gr4jA
-%                 6 hbv
-%                 7 gr4jB
-%    .mcode      numerical implementation
-%                 1 Runge Kutta MATLAB
-%                 2 ode45 MATLAB
-%                 3 Euler MATLAB
-%                 4 Runge Kutta C++/MEX
-%    .mode       evaluation mode
-%      'seq'      sequential
-%      'par'      parallel
-%    .names      list/cell array of model names
+% INPUT ARGUMENTS:
+%   mdl             model-selection settings
+%    .model          hydrologic model identifier
+%    .variant        optional model variant
+%   part            optional 'site' or 'sage'; default 'sage'
 %
-%   part        OPTIONAL: training approach
-%    'site'      single-site training
-%    'sage'      SAGE training
+% OUTPUT ARGUMENTS:
+%   none            text is written to the command window
 %
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % © Written by Jasper A. Vrugt, Dec. 2025
@@ -39,12 +27,10 @@ function write_header(mdl,part)
     end
     
     model = mdl.model;
-    model_names = mdl.names;
-    
-    if iscell(model_names)
-        mname = char(model_names{model});
-    else
-        mname = char(model_names(model));
+    mname = sage_model_name(model);
+    if isfield(mdl,'variant') ...
+            && strcmpi(string(mdl.variant),'gchm_ode')
+        mname = 'gchm_ode';
     end
     
     w = 43;   % inside width (characters)
@@ -56,7 +42,7 @@ function write_header(mdl,part)
         msg = sprintf('Individual training: %s', ...
             mname);
     else
-        error(['      Error: compile_model: ' ...
+        error(['      Error: write_header: ' ...
             'unknown entry of variable part']);
     end
     

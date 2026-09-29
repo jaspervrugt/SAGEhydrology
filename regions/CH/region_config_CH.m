@@ -17,9 +17,9 @@ function R = region_config_CH()
     X = struct();
     X.label = 'Daily';
     X.dt = 1;
-    X.basins.universe = 221;
-    X.basins.training = 180;
-    X.basins.evaluation = 41;
+    X.basins.universe = 331;
+    X.basins.training = 270;
+    X.basins.evaluation = 61;
     X.period.spinup_days = 365;
     X.period.manual.train_start = '01/10/2006';
     X.period.manual.train_end = '30/09/2014';
@@ -41,10 +41,10 @@ function R = region_config_CH()
     X.meteo.precipitation.default = '1 Observation-based';
     X.meteo.precipitation.enabled = true;
     X.meteo.temperature.items = { ...
-        '1 Observed mean', ...
+        '1 Observed', ...
         '2 (Tmin+Tmax)/2' ...
         };
-    X.meteo.temperature.default = '1 Observed mean';
+    X.meteo.temperature.default = '1 Observed';
     X.meteo.temperature.enabled = true;
     X.meteo.pet.items = {'1 Simulation-based'};
     X.meteo.pet.default = '1 Simulation-based';
@@ -129,6 +129,11 @@ function S = local_meteo_schema()
     S.variables.T = local_variable( ...
         'temperature_mean(degC)','degC','degC');
     S.variables.T.file = 'obs';
+    S.variables.SWE = local_variable('swe(mm)','mm','mm');
+    S.variables.SWE.file = 'obs';
+    S.variables.SWE.source_description = ...
+        'CAMELS-CH observation-based SWE';
+    S.variables.SWE.clip_min = 0;
     S.aux.tables.gauge.file = '../../gauge_information.txt';
     S.aux.tables.gauge.key = 'gauge_id';
     S.aux.tables.gauge.lat = 'gauge_lat';

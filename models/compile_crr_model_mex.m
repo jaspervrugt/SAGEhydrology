@@ -1,18 +1,23 @@
 function mexFile = compile_crr_model_mex
-%COMPILE_CRR_MODEL_MEX Build direct-core central CRR_MODEL MEX.
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%COMPILE_CRR_MODEL_MEX Build the unified CRR_MODEL MEX gateway.
 %
-% Models 1--7 are linked directly against their extracted native cores:
-%   1 HYMOD
-%   2 HMODEL
-%   3 SAC-SMA
-%   4 Xinanjiang
-%   5 GR4J-A+
-%   6 HBV
-%   7 CFE-NWM
+%  Links the native cores for HYMOD, HMODEL, SAC-SMA, Xinanjiang,
+%  GR4J-A+, HBV, and CFE-NWM into one MEX file.
 %
-% GR4J-B (model 21) is linked as a validated built-in core.
-% user_model (model 8) remains an independently compiled plug-in.
-
+% SYNOPSIS:
+%   mexFile = compile_crr_model_mex
+%
+% INPUT ARGUMENTS:
+%   (none)          no input arguments
+%
+% OUTPUT ARGUMENTS:
+%   mexFile         path to the compiled unified MEX file
+%
+% NOTES:
+%   Model 99 (user_model) remains a separately compiled plug-in.
+%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
     here = fileparts(mfilename('fullpath'));
 
@@ -27,9 +32,10 @@ function mexFile = compile_crr_model_mex
         fullfile(here,'sacsma','sacsma.cpp')
         fullfile(here,'Xinanjiang','xinanjiang.cpp')
         fullfile(here,'gr4jA','gr4jA.cpp')
-        fullfile(here,'gr4jB','gr4jB.cpp')
+
         fullfile(here,'hbv','hbv.cpp')
         fullfile(here,'cfe_nwm','cfe_nwm.cpp')
+
         };
 
     % Check compiler
@@ -53,7 +59,7 @@ function mexFile = compile_crr_model_mex
 
     fprintf(['Building direct-core CRR_MODEL MEX: ' ...
         'HYMOD, HMODEL, SAC-SMA, Xinanjiang, ' ...
-        'GR4J-A, GR4J-B, HBV, CFE-NWM...\n']);
+        'GR4J-A, HBV, CFE-NWM...\n']);
 
     mex( ...
         '-R2018a', ...

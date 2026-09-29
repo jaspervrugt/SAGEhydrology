@@ -41,6 +41,7 @@ function region = bootstrap_SAGE(root,region,dirres)
     dirres = local_text_scalar(dirres,'dirres');
 
     ensureSAGEpath(root);
+    local_add_private_gchm(root);
     region = region_helpers('code',region);
 
     if ~isfolder(dirres)
@@ -70,5 +71,39 @@ function value = local_text_scalar(value,name)
     if isempty(strtrim(value))
         error('bootstrap_SAGE:EmptyTextInput', ...
             '%s cannot be empty.',name);
+    end
+end
+
+% ===================================
+function local_add_private_gchm(root)
+% ===================================
+% Add the private GCHM plug-in in source mode only.
+
+    if isdeployed
+        return
+    end
+
+    gchmDir = fullfile(root,'SAGEhydrology', ...
+        'private','gchm');
+    hasCode = isfile(fullfile(gchmDir,'gchm.m')) ...
+        && isfile(fullfile(gchmDir,'read_gchm_info.m'));
+    hasNative = isfile(fullfile(gchmDir, ...
+        ['crr_gchm.' mexext])) ...
+        || (isfile(fullfile(gchmDir,'crr_gchm_mex.cpp')) ...
+        && isfile(fullfile(gchmDir,'gchm.cpp')));
+
+    if hasCode && hasNative
+        addpath(gchmDir);
+    end
+
+    odeDir = fullfile(root,'SAGEhydrology', ...
+        'private','gchm_ode');
+    hasOde = isfile(fullfile(odeDir,'gchm_ode.m')) ...
+        && isfile(fullfile(odeDir, ...
+        'read_gchm_ode_info.m')) ...
+        && isfile(fullfile(odeDir, ...
+        ['crr_gchm_ode.' mexext]));
+    if hasOde
+        addpath(odeDir);
     end
 end

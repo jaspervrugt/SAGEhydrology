@@ -1,60 +1,98 @@
-function varargout = hbv(par,mdl,data,ode,check)
+function varargout = hbv(par,mdl,data,ode,check,request)
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%HBV: Runge Kutta implementation of Hbv conceptual watershed model
-% SYNOPSIS: varargout = hbv(par,mdl,data,ode,check)
-%  par          dx1 vector of parameter values
-%   f_c:par(1)   field capacity (mm)
-%   beta:par(2)  shape exponent (-)
-%   lp:par(3)    evap limit fraction (-)
-%   k_0:par(4)   near-surface recession (1/T)
-%   uzl:par(5)   threshold for k0 (mm)
-%   k_1:par(6)   upper zone recession (1/T)
-%   k_2:par(7)   lower zone recession (1/T)
-%   perc:par(8)  percolation max (mm/T)
-%   T_tr:par(9)  temperature threshold (°C)
-%   f_dd:par(10) melt factor (mm/°C/T)
-%   sfcf:par(11) snowfall correction factor (-)
-%   cfr:par(12)  refreezing factor (-)
-%  mdl          structure with model state/parameter info
-%   .mcode       scalar numerical solution of watershed model
-%                 1 Runge Kutta implementation MATLAB
-%                 2 ode45 implementation MATLAB
-%                 3 Explicit Euler int_steps MATLAB
-%                 4 Runge Kutta implementation ode_hbv C++
-%   .y0          mx1 vector of initial states
-%   .pspace      0:hydrologic, 1:unit cube, 2:unconstrained parameters
-%   .th_min      dx1 vector of lower parameter values [= in pspace]
-%   .th_max      dx1 vector of upper parameter values [= in pspace]
-%   .par_names   1xd cell parameter names
-%   .id_train    1x2 vector of start and end index training period
-%   .id_eval     1x2 vector of start and end index evaluation period
-%   .eval_mode   evaluation design used during SAGE training
-%     'per'       training basins evaluated on evaluation period
-%     'bas'       evaluation basins evaluated on training period
-%     'basper'    evaluation basins evaluated on evaluation period
-%     'none'      no evaluation
-%   .tout        final model print time (scalar)
-%   .idx         1x2 vector of indices train&val periods
-%  data         structure with meteorological data and other info
-%   .P           (n+m)x1 record of precipitation (mm/T)
-%   .Ep          (n+m)x1 record of potential evapotranspiration (mm/T)
-%   .T           (n+m)x1 record of air temperature (°C)
-%  ode          structure with numerical settings ODE solver
-%   .InitStep    Initial time step
-%   .MaxStep     Maximum time step
-%   .MinStep     Minimum time step
-%   .RelTol      Relative tolerance
-%   .AbsTol      Absolute tolerance
-%   .Order       Order
-%   .maxiter     Maximum number of iterations
-%   .mem        storage of state variables [0: no, 1: yes]
-%  check        numerical check of J(x)_f and J(x)_th matrices (or not)
-%   0            do not check
-%   1            check Jacobian matrices of states and parameters
+%HBV HBV conceptual rainfall-runoff model.
+%
+%  Evaluates the hbv conceptual rainfall-runoff model using the selected ODE
+%  solver.
+%  A structured request returns only the requested observations, Jacobians,
+%  or states.
+%
+% SYNOPSIS:
+%   varargout = hbv(par,mdl,data,ode,check,request)
+%
+% INPUT ARGUMENTS:
+%   par             d-by-1 hydrologic parameter vector
+%    (1) f_c         soil field capacity (mm)
+%    (2) beta        soil-runoff shape exponent (-)
+%    (3) lp          evaporation-limiting fraction (-)
+%    (4) k_0         near-surface recession (1/T)
+%    (5) uzl         upper-zone threshold (mm)
+%    (6) k_1         upper-zone recession (1/T)
+%    (7) k_2         lower-zone recession (1/T)
+%    (8) perc        maximum percolation (mm/T)
+%    (9) T_tr        snow/rain temperature threshold (deg C)
+%    (10) f_dd       degree-day melt factor (mm/deg C/T)
+%    (11) sfcf       snowfall correction factor (-)
+%    (12) cfr        refreezing factor (-)
+%   mdl             model and parameter metadata
+%    .mcode          solver: 1 RK2, 2 ode45, 3 Euler, 4 C++ MEX
+%    .y0             initial model states
+%    .pspace         parameter space: 0 native, 1 linear, 2 log
+%    .th_min         lower parameter bounds
+%    .th_max         upper parameter bounds
+%    .par_names      parameter names
+%    .id_train       training basin identifiers
+%    .id_eval        evaluation basin identifiers
+%    .eval_mode      evaluation mode
+%    .tout           requested output times
+%    .idx            selected output indices
+%   data            meteorological forcings
+%    .P              precipitation
+%    .Ep             potential evaporation
+%    .T              temperature
+%   ode             numerical integration settings
+%    .InitStep       initial integration step
+%    .MaxStep        maximum integration step
+%    .MinStep        minimum integration step
+%    .RelTol         relative error tolerance
+%    .AbsTol         absolute error tolerance
+%    .Order          integration order
+%    .maxiter        maximum solver iterations
+%    .mem            retain full state trajectory when 1
+%   check           1 validates Jacobians; 0 skips validation
+%   request         optional structured output request
+%    .obs            requested observations (Q, SWE, or SM)
+%    .jac            requested observation Jacobian names
+%    .states         whether model states are needed
+%
+% OUTPUT ARGUMENTS:
+%   varargout       legacy outputs or one structured result
+%    q_n             simulated discharge (legacy)
+%    J               discharge Jacobian (legacy)
+%    Jth             parameter Jacobian (legacy)
+%    Z               model states (legacy)
+%    out             structured result when request is supplied
+%     .failed         true if model evaluation failed
+%     .obs            requested simulated observations
+%     .jac            requested observation Jacobians
+%     .states         requested model states
+%
+% NOTES:
+%   SWE is state 1; SM is soil-water state 2.
+%   ode.mem = 0 returns requested outputs without full state storage;
+%   ode45 or a states request retains the state trajectory.
+%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% © Written by Jasper A. Vrugt, Dec. 2011 / updated last Sept. 2026       %
+% University of California, Irvine                                        %
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
     if nargin < 5
         check = 0;          % no check of J(x)_f and J(x)_th
+    end
+    structured = nargin >= 6 ...
+        && ~isempty(request);
+    if ~structured, request = struct(); end
+    if structured
+        request = crr_request(request);
+        needJacobian = request.jacobian ...
+            || ~isempty(request.jac);
+        needHistory = ~isempty(request.states);
+        if needHistory
+            ode.mem = 1;
+        end
+    else
+        needJacobian = nargout > 1;
     end
     mcode = mdl.mcode;      % Formulation/language
                             % 1: Runge Kutta implementation MATLAB
@@ -88,12 +126,23 @@ function varargout = hbv(par,mdl,data,ode,check)
     eps = 5;                    % Dimensionless smoothing coefficient
     fail = false;               % Default: model completes run
     id = m + (1:d)*m;           % Indices of sensitivity state variables
+    [needSwe,needJswe,needSm,needJsm] = ...
+        model_named_requests(structured,request);
+    [needQ,needJq] = model_q_requests( ...
+        structured,request,needJacobian);
+    needQcalc = needQ || (needJq && d_par == d+1);
+    [q_n,J] = deal([]);
+    [swe_n,Jswe,sm_n,Jsm] = deal([]);
     if mem == 0
-        q_n = nan(n,1);
         % Preallocate all requested parameter columns, including the optional
         % MAXBAS routing parameter. This avoids expanding the full Jacobian
         % after a long 15-minute simulation.
-        J = nan(n,d_par);
+        [q_n,J] = model_q_arrays(n,d_par,needQcalc,needJq);
+        [swe_n,Jswe,sm_n,Jsm] = ...
+            model_named_arrays(n,d_par,needSwe,needJswe, ...
+            needSm,needJsm);
+        if needJswe, Jswe(:,d+1:d_par) = 0; end
+        if needJsm, Jsm(:,d+1:d_par) = 0; end
         ipr = mdl.idx(1);       % --> C++ code
     else
         Z = nan(ns,nvar); 
@@ -107,10 +156,9 @@ function varargout = hbv(par,mdl,data,ode,check)
             th = par;
             if (any(th<mdl.th_min) ...
                     || any(th>mdl.th_max))
-                varargout = {nan(n,1),nan(n,d_par),nan(d_par,1),Z}; 
-                return
+                varargout = {nan(n,1),nan(n,d_par),nan(d_par,1),Z}; return
             end
-            Jth = ones(d_par,1);                 % return dq_n/dth
+            Jth = ones(d_par,1);                % return dq_n/dth
         case 1 % normalized hydrologic parameter values
             nth = par;
             if (any(nth<0) ...
@@ -118,15 +166,15 @@ function varargout = hbv(par,mdl,data,ode,check)
                 varargout = {nan(n,1),nan(n,d_par),nan(d_par,1),Z}; return
             end
             dth_dnth = mdl.th_max - mdl.th_min; % dth/dnth
-            th = mdl.th_min + nth.*dth_dnth;    % hydrologic parameter values
+            th = mdl.th_min + nth.*dth_dnth;    % hydrologic parameters
             Jth = dth_dnth;                     % return dq_n/dnth
-        case 2 % unconstrained parameters (for training)
-            varth = par;
-            nth = 1./(1 + exp(-varth));         % normalized parameter values
-            dth_dnth = mdl.th_max-mdl.th_min;   % dth/dnth
-            th = mdl.th_min + nth.*dth_dnth;    % hydrologic parameter values
-            dnth_dvarth = nth.*(1-nth);         % dnth/dvarth
-            Jth = dth_dnth .* dnth_dvarth;      % return dq_n/dvarth
+        case 2 % unconstrained parameter values
+            vth = par;
+            nth = 1./(1 + exp(-vth));           % normalized values
+            dth_dnth = mdl.th_max - mdl.th_min; % dth/dnth
+            th = mdl.th_min + nth.*dth_dnth;    % hydrologic parameters
+            dnth_dvth = nth.*(1-nth);           % dnth/dvth
+            Jth = dth_dnth .* dnth_dvth;        % return dq_n/dvth
     end
     
     doRouting = (d_par == d+1);    % if caller provides extra parameter
@@ -228,8 +276,11 @@ function varargout = hbv(par,mdl,data,ode,check)
                     Z(s,1:nvar) = z;
                 else
                     if s >= ipr+1
-                        q_n(s-ipr) = z(m) - Z(m);
-                        J(s-ipr,1:d) = z(id) - Z(id);
+                        [q_n,J] = model_capture_q(z,Z,s-ipr, ...
+                            m,id,d,needQcalc,needJq,q_n,J);
+                        [swe_n,Jswe,sm_n,Jsm] = model_capture_states( ...
+                            z,s-ipr,m,d,1,2,needSwe,needJswe, ...
+                            needSm,needJsm,swe_n,Jswe,sm_n,Jsm);
                     end
                     Z(1,1:nvar) = z;
                 end
@@ -304,8 +355,11 @@ function varargout = hbv(par,mdl,data,ode,check)
                         Z(s,1:nvar) = z;            % State at t
                     else
                         if s >= ipr+1
-                            q_n(s-ipr) = z(m) - Z(m);
-                            J(s-ipr,1:d) = z(id) - Z(id);
+                            [q_n,J] = model_capture_q(z,Z,s-ipr, ...
+                                m,id,d,needQcalc,needJq,q_n,J);
+                            [swe_n,Jswe,sm_n,Jsm] = model_capture_states( ...
+                                z,s-ipr,m,d,1,2,needSwe,needJswe, ...
+                                needSm,needJsm,swe_n,Jswe,sm_n,Jsm);
                         end
                         Z(1,1:nvar) = z;
                     end
@@ -332,9 +386,35 @@ function varargout = hbv(par,mdl,data,ode,check)
             data.eps_t = eps_t;     % temperature smoothing (°C)
             data.eps_x = eps_x;     % smoothing coefficient (mm)
             data.ipr = ipr;         % Time to print
+            if structured
+                req_cpp=request;
+                hiddenQ=doRouting && any(request.jac=="Q") ...
+                    && ~any(request.obs=="Q");
+                if hiddenQ, req_cpp.obs=[req_cpp.obs;"Q"]; end
+                out=crr_hbv(mdl.tout,Z(1,1:nvar)',data,ode,req_cpp);
+                if doRouting && isfield(out,'obs') && isfield(out.obs,'Q')
+                    qraw=out.obs.Q;
+                    out.obs.Q=filter(w_rt,1,out.obs.Q);
+                end
+                if isfield(out,'jac')
+                    fn=fieldnames(out.jac);
+                    for kk=1:numel(fn)
+                        A=out.jac.(fn{kk});
+                        if strcmp(fn{kk},'Q') && doRouting
+                            for jj=1:d, A(:,jj)=filter(w_rt,1,A(:,jj)); end
+                            A(:,d+1)=filter(dw_rtdb,1,qraw);
+                        elseif doRouting
+                            A(:,d+1)=0;
+                        end
+                        out.jac.(fn{kk})=A.*reshape(Jth,1,[]);
+                    end
+                end
+                if hiddenQ, out.obs=rmfield(out.obs,'Q'); end
+                varargout={out}; return
+            end
 
             %[Z,q_n,J] = crr_hbv(mdl.tout,Z(1,1:nvar)',data,ode);
-            if nargout == 1
+            if ~needJacobian
                 if mem == 1
                     [Z,~] = crr_hbv( ...
                         mdl.tout,Z(1,1:nvar)',data,ode);
@@ -356,30 +436,46 @@ function varargout = hbv(par,mdl,data,ode,check)
     end
     
     if mem == 1
-        q_n = diff(Z(mdl.idx(1):mdl.idx(2),m));
-        switch nargout
-            case {2,3,4}
-                % diff appropriate elements of sensitivity state variables
-                J = diff(Z(mdl.idx(1):mdl.idx(2),id));
-    
-                % Add the optional routing-parameter column before filtering.
-                % Preallocation here prevents MATLAB from copying and growing
-                % the complete long Jacobian at J(:,d+1).
-                if doRouting
-                    J(:,d+1) = 0;
-                end
+        [q_n,Jode] = model_history_q(Z, ...
+            mdl.idx(1):mdl.idx(2),m,id,needQcalc,needJq,q_n,[]);
+        if needJq
+            J = nan(n,d_par);
+            J(:,1:d) = Jode;
+
+            % Add optional routing-parameter column before filtering
+            if doRouting
+                J(:,d+1) = 0;
+            end
         end
     end
     
-    if doRouting
-        if nargout > 1
+    if doRouting && needQcalc
+        if needJq
             % Compute dq/dB while q_n still contains unrouted discharge.
             % This removes the additional full-length q_norout copy.
             J(:,d+1) = filter(dw_rtdb,1,q_n);
         end    
         % Route discharge only after its derivative with respect to B has
         % been computed from the unrouted series.
-        q_n = filter(w_rt,1,q_n);
+        if needQ
+            q_n = filter(w_rt,1,q_n);
+        end
+    end
+    if structured
+        if ~needJq, J = []; end
+        if needJq
+            if doRouting
+                % Route derivatives of the ODE parameters
+                for j = 1:d
+                    J(:,j) = filter(w_rt,1,J(:,j));
+                end
+            end
+            J = J .* reshape(Jth,1,[]);
+        end
+        named = model_named_result(mem,Jth,needSwe,needJswe, ...
+            needSm,needJsm,swe_n,Jswe,sm_n,Jsm);
+        out = crr_result(q_n,J,Jth,Z,mdl,request,named);
+        varargout = {out}; return
     end
     if nargout == 1
         varargout = {q_n}; return
@@ -844,9 +940,9 @@ end
 % %   .id_train    1x2 vector of start and end index training period
 % %   .id_eval     1x2 vector of start and end index evaluation period
 % %   .eval_mode   evaluation design used during SAGE training
-% %     'per'       training basins evaluated on evaluation period
-% %     'bas'       evaluation basins evaluated on training period
-% %     'basper'    evaluation basins evaluated on evaluation period
+% %     'te'        training basins evaluated on evaluation period
+% %     'et'        evaluation basins evaluated on training period
+% %     'ee'        evaluation basins evaluated on evaluation period
 % %     'none'      no evaluation
 % %   .tout        final model print time (scalar)
 % %   .idx         1x2 vector of indices train&val periods
@@ -911,25 +1007,27 @@ end
 % switch mdl.pspace
 %     case 0 % hydrologic parameter values
 %         th = par;
-%         if (any(th<mdl.th_min) || any(th>mdl.th_max))
+%         if (any(th<mdl.th_min) ...
+%                 || any(th>mdl.th_max))
 %             varargout = {nan(n,1),nan(n,d_par),nan(d_par,1),Z}; return
 %         end
-%         Jth = ones(d_par,1);                 % return dq_n/dth
+%         Jth = ones(d_par,1);                % return dq_n/dth
 %     case 1 % normalized hydrologic parameter values
 %         nth = par;
-%         if (any(nth<0) || any(nth>1))
+%         if (any(nth<0) ...
+%                 || any(nth>1))
 %             varargout = {nan(n,1),nan(n,d_par),nan(d_par,1),Z}; return
 %         end
 %         dth_dnth = mdl.th_max - mdl.th_min; % dth/dnth
-%         th = mdl.th_min + nth.*dth_dnth;    % hydrologic parameter values
+%         th = mdl.th_min + nth.*dth_dnth;    % hydrologic parameters
 %         Jth = dth_dnth;                     % return dq_n/dnth
-%     case 2 % unconstrained parameters (for training)
-%         varth = par;
-%         nth = 1./(1 + exp(-varth));         % normalized parameter values
-%         dth_dnth = mdl.th_max-mdl.th_min;   % dth/dnth
-%         th = mdl.th_min + nth.*dth_dnth;    % hydrologic parameter values
-%         dnth_dvarth = nth.*(1-nth);         % dnth/dvarth
-%         Jth = dth_dnth .* dnth_dvarth;      % return dq_n/dvarth
+%     case 2 % unconstrained parameter values
+%         vth = par;
+%         nth = 1./(1 + exp(-vth));           % normalized values
+%         dth_dnth = mdl.th_max - mdl.th_min; % dth/dnth
+%         th = mdl.th_min + nth.*dth_dnth;    % hydrologic parameters
+%         dnth_dvth = nth.*(1-nth);           % dnth/dvth
+%         Jth = dth_dnth .* dnth_dvth;        % return dq_n/dvth
 % end
 % 
 % doRouting = (d_par > d);    % if caller provides extra parameter

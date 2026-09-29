@@ -1,56 +1,30 @@
 function [flag,status] = compile_model(mdl)
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%COMPILE_MODEL Locate or compile C++/MEX model core
+%COMPILE_MODEL Locate or compile a model MEX core.
+%
+%  Checks the selected C++ model implementation and compiles when needed.
 %
 % SYNOPSIS:
 %   flag = compile_model(mdl)
 %   [flag,status] = compile_model(mdl)
 %
-% INPUT:
-%   mdl         structure with model selection/settings
-%    .model      choice of model
-%                 1 hymod
-%                 2 hmodel
-%                 3 sacsma
-%                 4 xinanjiang
-%                 5 gr4jA
-%                 6 hbv
-%                 7 gr4jB
-%    .mcode      numerical implementation
-%                 1 Runge Kutta MATLAB
-%                 2 ode45 MATLAB
-%                 3 Euler MATLAB
-%                 4 Runge Kutta C++/MEX
-%    .mode       evaluation mode
-%      'seq'      sequential
-%      'par'      parallel
-%    .names      list/cell array of model names
+% INPUT ARGUMENTS:
+%   mdl             model selection and implementation settings
+%    .model          built-in hydrologic model identifier
+%    .mcode          numerical implementation code; 4 selects C++
+%    .names          available model names
 %
-% OUTPUT:
-%   flag        execution flag
-%                0 no compilation needed; existing MEX found
-%                1 successfully compiled
-%               -1 compilation failed
-%               -2 required file/folder not found
-%               -3 deployed mode: MEX missing and compilation not allowed
-%
-%   status      short status message suitable for GUI logging
+% OUTPUT ARGUMENTS:
+%   flag            compilation outcome code
+%   status          short status message for GUI logging
 %
 % NOTES:
-%   When called with one output:
+%   flag is 0 for an existing MEX, 1 for successful compilation, -1 for
+%   failure, -2 for missing source, and -3 for a missing MEX in deployed
+%   mode.
 %
-%       flag = compile_model(mdl);
-%
-%   the status is printed directly in the MATLAB command window.
-%
-%   When called with two outputs:
-%
-%       [flag,status] = compile_model(mdl);
-%
-%   no status is printed. The caller can then log status itself.
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % © Written by Jasper A. Vrugt, Dec. 2025
-%   Revised for robust deployed/non-deployed and GUI behavior
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
     % Store the output behavior of the parent function call.
@@ -64,26 +38,8 @@ function [flag,status] = compile_model(mdl)
     model_names = mdl.names;
     mcode       = mdl.mcode;
 
-    % Resolve selected model name
-    if iscell(model_names)
-        mname = char(model_names{model});
-
-    elseif isstring(model_names)
-        mname = char(model_names(model));
-
-    elseif ischar(model_names)
-        if size(model_names,1) > 1
-            mname = model_names(model,:);
-        else
-            mname = model_names;
-        end
-
-    else
-        error('compile_model:invalidModelNames', ...
-            'mdl.names must be a cell array, string array, or character array.');
-    end
-
-    mname = strtrim(mname);
+    % Resolve selected model name from its stable identifier.
+    mname = strtrim(sage_model_name(model));
 
     flag   = 0;
     status = '';
@@ -155,13 +111,9 @@ function [flag,status] = compile_model(mdl)
             folder_name = 'Xinanjiang';
             cpp_stem    = 'crr_xinanjiang';
 
-        case 'gr4ja'
+        case 'gr4j'
             folder_name = 'gr4jA';
             cpp_stem    = 'crr_gr4jA';
-
-        case 'gr4jb'
-            folder_name = 'gr4jB';
-            cpp_stem    = 'crr_gr4jB';
 
         case 'hbv'
             folder_name = 'hbv';
@@ -172,7 +124,9 @@ function [flag,status] = compile_model(mdl)
             cpp_stem    = ['crr_',mname];
     end
 
-    if is_user_model
+    if strcmpi(mname,'gchm')
+        dir_model = fullfile(sage_root,'private','gchm');
+    elseif is_user_model
         dir_model = local_user_model_dir(mdl,sage_root);
     else
         dir_model = fullfile(dir_models,folder_name);
@@ -193,14 +147,14 @@ function [flag,status] = compile_model(mdl)
     end
 
     split_models = {'hymod','hmodel','sacsma','xinanjiang', ...
-        'gr4ja','gr4jb','hbv','cfe_nwm'};
+        'gr4j','hbv','cfe_nwm','gchm'};
     is_split_model = ismember(lower(mname),split_models);
 
     if is_user_model
         source_names = {'crr_user_model_mex.cpp', ...
             'user_model_prepare.cpp','user_model.cpp'};
     elseif is_split_model
-        if strcmpi(mname,'gr4ja')
+        if strcmpi(mname,'gr4j')
             native_stem = 'gr4jA';
         else
             native_stem = lower(mname);
@@ -215,7 +169,18 @@ function [flag,status] = compile_model(mdl)
     % ------------------------------------------------------------
     % 1. Best case: compiled binary already exists on hard disk
     % ------------------------------------------------------------
-    if isfile(mex_file)
+    binaryCurrent = isfile(mex_file);
+    if binaryCurrent && strcmpi(mname,'gchm') && ~isdeployed
+        binaryInfo = dir(mex_file);
+        dependencies = [source_names, {'gchm.hpp','gchm.m','read_gchm_info.m'}];
+        for idep = 1:numel(dependencies)
+            sourceInfo = dir(fullfile(dir_model,dependencies{idep}));
+            if ~isempty(sourceInfo) && sourceInfo.datenum > binaryInfo.datenum
+                binaryCurrent = false;
+            end
+        end
+    end
+    if binaryCurrent
         flag   = 0;
         status = 'MEX found on hard disk';
 
@@ -457,6 +422,7 @@ function [flag,status] = compile_model(mdl)
     % Nested utility: print only when status was not requested by caller
     % =====================================================================
     function printStatus()
+    %PRINTSTATUS Print the compilation status for single-output calls.
 
         if ~print_status || isempty(status)
             return
@@ -487,6 +453,7 @@ function [flag,status] = compile_model(mdl)
     end
 
     function folder = local_user_model_dir(modelInfo,sageRoot)
+    %LOCAL_USER_MODEL_DIR Locate the external user-model directory.
 
         candidates = strings(0,1);
         located = which(['crr_user_model.' mexext]);

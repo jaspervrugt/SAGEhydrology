@@ -325,12 +325,15 @@ function T = local_read_table(dirD,S,idSchema)
                 && ~isempty(S.valid_name_replacement)
             replacement = S.valid_name_replacement;
         end
-        T.Properties.VariableNames = matlab.lang.makeValidName( ...
-            T.Properties.VariableNames,'ReplacementStyle',replacement);
+        T.Properties.VariableNames = ...
+            matlab.lang.makeValidName( ...
+            T.Properties.VariableNames, ...
+            'ReplacementStyle',replacement);
     end
     if isfield(S,'make_unique_names') ...
             && S.make_unique_names
-        T.Properties.VariableNames = matlab.lang.makeUniqueStrings( ...
+        T.Properties.VariableNames = ...
+            matlab.lang.makeUniqueStrings( ...
             T.Properties.VariableNames);
     end
     if isfield(S,'row_filter') ...
@@ -515,7 +518,8 @@ end
 
 function W = local_widen_table(T,idName,keyNames)
     keyNames = cellstr(string(keyNames));
-    keyNames = keyNames(ismember(keyNames,T.Properties.VariableNames));
+    keyNames = keyNames(ismember(keyNames, ...
+        T.Properties.VariableNames));
     ids = T.(idName);
     [uniqueIds,~,group] = unique(ids);
     if numel(uniqueIds) == height(T)
@@ -596,7 +600,8 @@ function T = local_coalesce_table(T,fallback,key)
                 || islogical(T.(name))
             value = double(T.(name));
             sourceValue = double(source(location(found)));
-            missing = ~isfinite(value(rows)) & isfinite(sourceValue);
+            missing = ~isfinite(value(rows)) ...
+                & isfinite(sourceValue);
             value(rows(missing)) = sourceValue(missing);
         else
             value = string(T.(name));
@@ -630,7 +635,8 @@ function T = local_read_native_table(file,S)
             {'Encoding',S.encoding}];
     end
     try
-        options = detectImportOptions(file,readArguments{:});
+        options = detectImportOptions(file, ...
+            readArguments{:});
     catch
         options = detectImportOptions(file, ...
             'VariableNamingRule','preserve');
@@ -641,7 +647,8 @@ function T = local_read_native_table(file,S)
         optionNames = options.VariableNames;
         candidates = cellstr(string(S.keys));
         for i = 1:numel(candidates)
-            location = find(strcmpi(optionNames,candidates{i}),1);
+            location = find(strcmpi(optionNames, ...
+                candidates{i}),1);
             if ~isempty(location)
                 optionKey = optionNames{location};
                 break
@@ -708,7 +715,8 @@ function T = local_read_catalog_matrix(file,S,idSchema)
     wanted = string(catalog.names(:));
     if isfield(S,'exclude_catalog') ...
             && ~isempty(S.exclude_catalog)
-        wanted = wanted(~ismember(wanted,string(S.exclude_catalog)));
+        wanted = wanted(~ismember(wanted, ...
+            string(S.exclude_catalog)));
     end
     for i = 1:numel(wanted)
         name = wanted(i);
@@ -730,7 +738,8 @@ function T = local_read_catalog_matrix(file,S,idSchema)
                 row = find(validNames == components(j),1);
                 if isempty(row)
                     error('read_attribute_data:MissingMatrixRow', ...
-                        'Missing attribute-matrix row: %s.',components(j));
+                        ['Missing attribute-matrix ' ...
+                        'row: %s.'],components(j));
                 end
                 values(j,:) = local_matrix_row( ...
                     source{row,firstBasin:end});
@@ -830,9 +839,21 @@ function T = local_project_coordinates(T,S)
     longitude = x;
     project = ~geographic;
     if any(project)
-        crs = projcrs(S.epsg);
-        [latitude(project),longitude(project)] = ...
-            projinv(crs,x(project),y(project));
+
+        hasProjectionSupport = ...
+            exist('projcrs','file') == 2 ...
+            && exist('projinv','file') == 2 ...
+            && (isdeployed ...
+            || license('test','map_toolbox'));
+
+        if hasProjectionSupport
+            crs = projcrs(S.epsg);
+            [latitude(project),longitude(project)] = ...
+                projinv(crs,x(project),y(project));
+        else
+            [latitude(project),longitude(project)] = ...
+                sage_projinv_fallback(S.epsg,x(project),y(project));
+        end
     end
     T.(S.latitude_target) = latitude;
     T.(S.longitude_target) = longitude;
@@ -999,36 +1020,6 @@ function local_write_gauge_information( ...
         return
     end
 
-    % Keep a complete existing lookup, but rebuild files created from an
-    % earlier screened subset. This lets a region move to a universal basin
-    % inventory without asking users to delete gauge_information.txt first.
-    if isfile(outputFile)
-        try
-            existing = readtable(outputFile, ...
-                'TextType','string','VariableNamingRule','preserve');
-            idColumn = local_find_column(existing, ...
-                {'gauge_id','gauge','id'},true);
-            if ~isempty(idColumn)
-                existingId = strip(string(existing.(idColumn)));
-                existingId = regexprep(existingId,'\.0+$','');
-                requestedId = strip(string(id_gauge(:)));
-                requestedId = regexprep(requestedId,'\.0+$','');
-                [found,location] = ismember(requestedId,existingId);
-                nameColumn = local_find_column(existing, ...
-                    {'gauge_name','station_name','name'},true);
-                requestedName = strip(string(gname(:)));
-                if all(found) && ~isempty(nameColumn)
-                    existingName = strip(string(existing.(nameColumn)));
-                    if all(existingName(location) == requestedName)
-                        return
-                    end
-                end
-            end
-        catch
-            % A malformed or unreadable lookup is replaced below.
-        end
-    end
-
     latitude = local_optional_numeric_column(attributes,{ ...
         'gauge_lat_dd','gauge_lat','gauge_latitude','latitude','lat', ...
         'station_lat','station_latitude','lat_outlet','LAT_GAGE'});
@@ -1039,6 +1030,8 @@ function local_write_gauge_information( ...
     elevation = local_optional_numeric_column(attributes,{ ...
         'gauge_elev','gauge_elevation','elevation','elev', ...
         'station_elev','station_elevation','ELEV_GAGE_M'});
+    elevation = local_apply_elevation_overrides( ...
+        elevation,id_gauge,schema.metadata);
     area = local_optional_numeric_column(attributes,{ ...
         'area_km2','area_calc','area','catchment_area','catchment_area_km2', ...
         'basin_area_km2','drainage_area_km2','DRAIN_SQKM'});
@@ -1047,6 +1040,45 @@ function local_write_gauge_information( ...
             'area_m2','catchment_area_m2','basin_area_m2'})/1e6;
     end
 
+    % Keep a complete, current lookup and rebuild stale or partial files.
+    if isfile(outputFile)
+        try
+            existing = readtable(outputFile, ...
+                'TextType','string','VariableNamingRule','preserve');
+            idColumn = local_find_column(existing, ...
+                {'gauge_id','gauge','id'},true);
+            nameColumn = local_find_column(existing, ...
+                {'gauge_name','station_name','name'},true);
+            elevationColumn = local_find_column(existing, ...
+                {'gauge_elev','gauge_elevation','station_elev', ...
+                 'station_elevation','elevation','elev'},true);
+            if ~isempty(idColumn) && ~isempty(nameColumn) ...
+                    && ~isempty(elevationColumn)
+                existingId = strip(string(existing.(idColumn)));
+                existingId = regexprep(existingId,'\.0+$','');
+                requestedId = strip(string(id_gauge(:)));
+                requestedId = regexprep(requestedId,'\.0+$','');
+                [found,location] = ismember(requestedId,existingId);
+                if all(found)
+                    existingName = strip(string(existing.(nameColumn)));
+                    requestedName = strip(string(gname(:)));
+                    existingElevation = local_numeric( ...
+                        existing.(elevationColumn));
+                    sameElevation = ...
+                        existingElevation(location) == elevation;
+                    sameElevation( ...
+                        isnan(existingElevation(location)) ...
+                        & isnan(elevation)) = true;
+                    if all(existingName(location) == requestedName) ...
+                            && all(sameElevation)
+                        return
+                    end
+                end
+            end
+        catch
+            % A malformed or unreadable lookup is replaced below.
+        end
+    end
     gauge_id = string(id_gauge(:));
     gauge_name = string(gname(:));
     gauge_lat = latitude;
@@ -1135,6 +1167,57 @@ function names = local_apply_name_overrides(names,ids,metadata)
     end
 end
 
+function elevation = local_apply_elevation_overrides( ...
+    elevation,ids,metadata)
+% Apply gauge elevations from the configured station metadata lookup.
+
+    if ~isfield(metadata,'name_override_file') ...
+            || isempty(metadata.name_override_file)
+        return
+    end
+
+    lookupFile = char(string(metadata.name_override_file));
+    if ~isfile(lookupFile)
+        utilitiesRoot = fileparts(fileparts(mfilename('fullpath')));
+        lookupFile = fullfile(utilitiesRoot,'metadata',lookupFile);
+    end
+    if ~isfile(lookupFile)
+        return
+    end
+
+    try
+        lookup = readtable(lookupFile,'TextType','string', ...
+            'VariableNamingRule','preserve');
+        idColumn = local_find_column(lookup, ...
+            {'gauge_id','station_id','official_id','id'},true);
+        elevationColumn = local_find_column(lookup, ...
+            {'gauge_elev','gauge_elevation','station_elev', ...
+             'station_elevation','elevation','elev'},true);
+        if isempty(idColumn) || isempty(elevationColumn)
+            return
+        end
+
+        lookupId = upper(strip(string(lookup.(idColumn))));
+        lookupId = regexprep(lookupId,'\.0+$','');
+        lookupElevation = local_numeric(lookup.(elevationColumn));
+        valid = lookupId ~= "" & ~ismissing(lookupId) ...
+            & isfinite(lookupElevation);
+        lookupId = lookupId(valid);
+        lookupElevation = lookupElevation(valid);
+        [lookupId,uniqueRows] = unique(lookupId,'stable');
+        lookupElevation = lookupElevation(uniqueRows);
+
+        matchId = upper(strip(string(ids(:))));
+        matchId = regexprep(matchId,'\.0+$','');
+        [found,location] = ismember(matchId,lookupId);
+        elevation = elevation(:);
+        elevation(found) = lookupElevation(location(found));
+    catch ME
+        warning('read_attribute_data:ElevationOverrideRead', ...
+            'Could not apply station elevations from %s: %s', ...
+            lookupFile,ME.message);
+    end
+end
 function value = local_optional_numeric_column(T,candidates)
     column = local_find_column(T,candidates,true);
     if isempty(column)

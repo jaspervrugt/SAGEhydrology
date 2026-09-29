@@ -1,56 +1,42 @@
-function [phi,opts] = descent(stage,alg,x,dLdphi,i,opts)
+function varargout = descent(stage,alg,x,dLdphi,i,opts)
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%DESCENT Initializes and updates feedforward-network decision variables.
+%DESCENT Initialize or update FFN optimization state.
+%
+%  Implements normalized gradient descent or Adam/AdamW with an optional
+%  learning-rate schedule.
 %
 % SYNOPSIS:
-%   [phi,opts] = descent('init',alg,net)
+%   opts = descent('init',alg,phi)
 %   [phi,opts] = descent('dyn',alg,phi,dLdphi,i,opts)
 %
-%   stage       operation
-%                'init' initialize phi and optimizer state
-%                'dyn'  generate a new phi proposal
+% INPUT ARGUMENTS:
+%   stage           'init' or 'dyn'
+%   alg             optimizer settings
+%    .method         1 normalized descent; 2 Adam/AdamW
+%    .i_max          number of evaluated SAGE iterations
+%    .lr             initial learning rate
+%    .lr_min         optional minimum/final learning rate
+%    .lr_scheme      constant, cosine, or hold_cosine
+%    .lr_hold        optional initial hold fraction
+%    .beta_1         Adam first-moment decay
+%    .beta_2         Adam second-moment decay
+%    .vareps         Adam stabilizer
+%    .wdecay         optional AdamW weight decay
+%   phi             network weights, biases, layers, and transfers
+%   dLdphi          network-parameter loss gradient for 'dyn'
+%   i               outer SAGE iteration number
+%   opts            optimizer state from 'init' or prior update
 %
-%   alg         descent-algorithm structure
-%    .method      1 normalized gradient descent, 2 Adam/AdamW
-%    .i_max       number of evaluated SAGE iterations
-%    .clipn       global gradient-norm clipping threshold; clipping is
-%                 applied upstream by ffn_theta (default 0 = off)
-%    .wdecay      AdamW weight decay (default 0 = off)
-%    .lr          initial learning rate (> 0)
-%    .lr_min      minimum/final learning rate (default = lr)
-%    .lr_scheme   'constant' (default), 'cosine', or 'hold_cosine'
-%    .lr_hold     fraction of optimizer updates held at lr for
-%                 'hold_cosine' (default 0.20; 0 <= lr_hold < 1)
-%
-%   net         network specification used with stage = 'init'
-%    .r           number of input attributes
-%    .d           number of output hydrologic parameters
-%    .h           hidden-layer widths
-%    .tf          hidden-layer transfer functions
-%    .seed        optional nonnegative integer RNG seed (default 0)
-%
-%   phi         network weights and biases used with stage = 'dyn'
-%    .W{1:nL}    weight matrices
-%    .b{1:nL}    bias vectors
-%    .layers      layer sizes
-%    .tf          hidden-layer transfer functions
-%
-%   dLdphi     gradient of loss with respect to phi
-%   i           outer SAGE iteration number; retained for diagnostics
-%   opts        internal optimizer state
-%
-% OUTPUT:
-%   phi         initialized or updated network variables
-%   opts        optimizer settings/state
-%    .t           number of completed optimizer updates
-%    .lr_current  learning rate used for the latest proposal
-%    .n_phi       total number of network weights and biases
+% OUTPUT ARGUMENTS:
+%   phi             updated network parameters for 'dyn'
+%   opts            optimizer state and learning-rate diagnostics
+%    .t              completed optimizer updates
+%    .lr_current     learning rate of latest proposal
+%    .n_phi          number of network weights and biases
 %
 % NOTES:
-%   1. descent owns creation and updating of phi.
-%   2. ffn_theta only evaluates phi -> nTheta and computes dL/dphi.
-%   3. The first dynamic call is optimizer update t = 1, even when it
-%      occurs at outer SAGE iteration i = 2.
+%   Global gradient clipping is applied upstream by FFN_THETA.
+%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % © Written by Jasper A. Vrugt, Dec. 2025                                 %
 % University of California Irvine                                         %
@@ -73,9 +59,9 @@ function [phi,opts] = descent(stage,alg,x,dLdphi,i,opts)
 
     switch stage
         case 'init'
-            net = x;
-            phi = local_initialize_phi(net);
+            phi = local_validate_phi_struct(x);
             opts = local_initialize_opts(alg,phi);
+            varargout = {opts};
 
         case 'dyn'
             phi = local_validate_phi_struct(x);
@@ -83,14 +69,14 @@ function [phi,opts] = descent(stage,alg,x,dLdphi,i,opts)
             if isempty(dLdphi)
                 error(['      Error: descent(''dyn''): ' ...
                     'dLdphi is empty. Use ' ...
-                    'descent(''init'',alg,net) to create ' ...
-                    'the initial phi.']);
+                    'ffn_theta(''init'',net) to create ' ...
+                    'the initial phi before optimizer setup.']);
             end
             if isempty(opts) ...
                     || ~isstruct(opts)
                 error(['      Error: descent(''dyn''): ' ...
                     'opts must be the state returned ' ...
-                    'by descent(''init'',alg,net).']);
+                    'by descent(''init'',alg,phi).']);
             end
             if ~isempty(i) ...
                     && (~isnumeric(i) ...
@@ -102,6 +88,7 @@ function [phi,opts] = descent(stage,alg,x,dLdphi,i,opts)
             end
 
             [phi,opts] = local_dynamic_update(phi,dLdphi,opts);
+            varargout = {phi,opts};
 
         otherwise
             error(['      Error: descent: ' ...
@@ -110,95 +97,9 @@ function [phi,opts] = descent(stage,alg,x,dLdphi,i,opts)
     end
 end
 
-function phi = local_initialize_phi(net)
-%LOCAL_INITIALIZE_PHI Initialize ANN weights and biases.
-
-    if ~isstruct(net)
-        error(['      Error: descent(''init''): ' ...
-            'net must be a structure.']);
-    end
-
-    if ~isfield(net,'h') ...
-            && isfield(net,'ann') ...
-            && isstruct(net.ann) ...
-            && isfield(net.ann,'h')
-        net.h = net.ann.h;
-    end
-    if ~isfield(net,'tf') ...
-            && isfield(net,'ann') ...
-            && isstruct(net.ann) ...
-            && isfield(net.ann,'tf')
-        net.tf = net.ann.tf;
-    end
-
-    req = {'r','d','h','tf'};
-    for k = 1:numel(req)
-        if ~isfield(net,req{k}) ...
-                || isempty(net.(req{k}))
-            error(['      Error: descent(''init''): ' ...
-                'net.%s is missing or empty.'],req{k});
-        end
-    end
-
-    r = local_positive_integer(net.r,'net.r');
-    d = local_positive_integer(net.d,'net.d');
-    h = local_parse_hidden_widths(net.h);
-
-    if numel(h) > 5
-        error(['      Error: descent(''init''): ' ...
-            'at most five hidden layers are supported.']);
-    end
-
-    tf = local_parse_transfer_functions(net.tf,numel(h));
-    layers = [double(r),h,double(d)];
-    nL = numel(layers)-1;
-    nH = numel(h);
-
-    if isfield(net,'seed') ...
-            && ~isempty(net.seed)
-        seed = net.seed;
-    else
-        seed = 0;
-    end
-    if ~isnumeric(seed) ...
-            || ~isscalar(seed) ...
-            || ~isfinite(seed) ...
-            || seed < 0 ...
-            || mod(seed,1) ~= 0
-        error(['      Error: descent(''init''): ' ...
-            'net.seed must be a ' ...
-            'nonnegative integer scalar.']);
-    end
-
-    fprintf(['... Initializing network ' ...
-        'weights and biases']);
-    rng(double(seed),'twister');
-
-    phi = struct();
-    phi.W = cell(1,nL);
-    phi.b = cell(1,nL);
-    phi.layers = layers;
-    phi.tf = tf;
-
-    for li = 1:nL
-        ni = layers(li);
-        no = layers(li+1);
-
-        lim = sqrt(6/(ni+no));
-        W = (2*rand(no,ni)-1)*lim;
-
-        if li <= nH ...
-                && strcmpi(tf{li},'relu')
-            W = randn(no,ni)*sqrt(2/ni);
-        end
-
-        phi.W{li} = W;
-        phi.b{li} = zeros(no,1);
-    end
-
-    fprintf(' ... Done\n');
-end
-
+% =============
+% local helpers
+% =============
 function opts = local_initialize_opts(alg,phi)
 %LOCAL_INITIALIZE_OPTS Validate settings and initialize optimizer state.
 
@@ -225,7 +126,7 @@ function opts = local_initialize_opts(alg,phi)
     end
     if ~isfield(alg,'lr') ...
             || isempty(alg.lr)
-        alg.lr = (alg.method==1)*1e-4 + (alg.method==2)*1e-2;
+        alg.lr = (alg.method == 1) * 1e-4 + (alg.method == 2) * 1e-2;
     end
     if ~isfield(alg,'lr_scheme') ...
             || isempty(alg.lr_scheme)
@@ -248,12 +149,48 @@ function opts = local_initialize_opts(alg,phi)
     end
     local_positive_integer(alg.i_max,'alg.i_max');
 
+    if alg.method == 2
+        required = {'beta_1','beta_2','vareps'};
+        for k = 1:numel(required)
+            if ~isfield(alg,required{k}) ...
+                    || isempty(alg.(required{k}))
+                error(['      Error: descent: alg.%s is required ' ...
+                    'for Adam/AdamW.'],required{k});
+            end
+        end
+    end
+
     if ~isnumeric(alg.lr) ...
             || ~isscalar(alg.lr) ...
             || ~isfinite(alg.lr) ...
             || alg.lr <= 0
         error(['      Error: descent: alg.lr must be a positive ' ...
             'finite scalar.']);
+    end
+    if alg.method == 2
+        if ~isnumeric(alg.beta_1) ...
+                || ~isscalar(alg.beta_1) ...
+                || ~isfinite(alg.beta_1) ...
+                || alg.beta_1 <= 0 ...
+                || alg.beta_1 >= 1
+            error(['      Error: descent: alg.beta_1 must be a finite ' ...
+                'scalar in the open interval (0,1).']);
+        end
+        if ~isnumeric(alg.beta_2) ...
+                || ~isscalar(alg.beta_2) ...
+                || ~isfinite(alg.beta_2) ...
+                || alg.beta_2 <= 0 ...
+                || alg.beta_2 >= 1
+            error(['      Error: descent: alg.beta_2 must be a finite ' ...
+                'scalar in the open interval (0,1).']);
+        end
+        if ~isnumeric(alg.vareps) ...
+                || ~isscalar(alg.vareps) ...
+                || ~isfinite(alg.vareps) ...
+                || alg.vareps <= 0
+            error(['      Error: descent: alg.vareps must be a positive ' ...
+                'finite scalar.']);
+        end
     end
     if ~isnumeric(alg.lr_min) ...
             || ~isscalar(alg.lr_min) ...
@@ -299,9 +236,9 @@ function opts = local_initialize_opts(alg,phi)
         'n_phi',local_count_phi(phi));
 
     if opts.method == 2
-        opts.beta_1 = 0.9;
-        opts.beta_2 = 0.999;
-        opts.vareps = 1e-8;
+        opts.beta_1 = double(alg.beta_1);
+        opts.beta_2 = double(alg.beta_2);
+        opts.vareps = double(alg.vareps);
 
         nL = numel(phi.W);
         opts.mW = cell(1,nL);
@@ -362,30 +299,30 @@ function [phi,opts] = local_dynamic_update(phi,dLdphi,opts)
                 gW = dLdphi.W{li};
                 gB = dLdphi.b{li};
 
-                opts.mW{li} = beta_1*opts.mW{li} ...
-                    + (1-beta_1)*gW;
-                opts.vW{li} = beta_2*opts.vW{li} ...
-                    + (1-beta_2)*(gW.^2);
-                mW_hat = opts.mW{li}/(1-beta_1^t);
-                vW_hat = opts.vW{li}/(1-beta_2^t);
-                stepW = mW_hat./(sqrt(vW_hat)+vareps);
+                opts.mW{li} = beta_1 * opts.mW{li} ...
+                    + (1 - beta_1)*gW;
+                opts.vW{li} = beta_2 * opts.vW{li} ...
+                    + (1 - beta_2)*(gW.^2);
+                mW_hat = opts.mW{li} / (1 - beta_1^t);
+                vW_hat = opts.vW{li} / (1 - beta_2^t);
+                stepW = mW_hat ./ (sqrt(vW_hat) + vareps);
 
                 if wd > 0
                     phi.W{li} = phi.W{li} ...
-                        - lr*(stepW + wd*phi.W{li});
+                        - lr * (stepW + wd*phi.W{li});
                 else
-                    phi.W{li} = phi.W{li} - lr*stepW;
+                    phi.W{li} = phi.W{li} - lr * stepW;
                 end
 
-                opts.mB{li} = beta_1*opts.mB{li} ...
-                    + (1-beta_1)*gB;
-                opts.vB{li} = beta_2*opts.vB{li} ...
-                    + (1-beta_2)*(gB.^2);
-                mB_hat = opts.mB{li}/(1-beta_1^t);
-                vB_hat = opts.vB{li}/(1-beta_2^t);
-                stepB = mB_hat./(sqrt(vB_hat)+vareps);
+                opts.mB{li} = beta_1 * opts.mB{li} ...
+                    + (1 - beta_1) * gB;
+                opts.vB{li} = beta_2 * opts.vB{li} ...
+                    + (1 - beta_2) * (gB.^2);
+                mB_hat = opts.mB{li} / (1 - beta_1^t);
+                vB_hat = opts.vB{li} / (1 - beta_2^t);
+                stepB = mB_hat ./ (sqrt(vB_hat) + vareps);
 
-                phi.b{li} = phi.b{li} - lr*stepB;
+                phi.b{li} = phi.b{li} - lr * stepB;
             end
 
         otherwise
@@ -408,16 +345,21 @@ function [phi,opts] = local_dynamic_update(phi,dLdphi,opts)
 end
 
 function n = local_phi_norm(phi)
+%LOCAL_PHI_NORM 
     n = local_cell_pair_norm(phi.W,phi.b);
 end
+
 function n = local_phi_weight_norm(phi)
+%LOCAL_PHI_WEIGHT_NORM 
     n2 = 0; 
     for k = 1:numel(phi.W)
         n2 = n2 + sum(double(phi.W{k}(:)).^2); 
     end
     n = sqrt(n2);
 end
+
 function n = local_phi_difference_norm(a,b)
+%LOCAL_PHI_DIFFERENCE_NORM 
     n2 = 0; 
     for k = 1:numel(a.W) 
         n2 = n2 + sum(double(a.W{k}(:)-b.W{k}(:)).^2) ...
@@ -425,7 +367,9 @@ function n = local_phi_difference_norm(a,b)
     end
     n = sqrt(n2);
 end
+
 function n = local_cell_pair_norm(A,B)
+%LOCAL_CELL_PAIR_NORM 
     n2 = 0; 
     for k = 1:numel(A)
         n2 = n2+sum(double(A{k}(:)).^2) + ...
@@ -446,8 +390,8 @@ function lr = local_learning_rate(opts,t)
             'positive finite scalar.']);
     end
 
-    maxUpdates = max(double(opts.i_max)-1,1);
-    progress = (double(t)-1)/max(maxUpdates-1,1);
+    maxUpdates = max(double(opts.i_max) - 1,1);
+    progress = (double(t) - 1)/max(maxUpdates - 1,1);
     progress = min(max(progress,0),1);
 
     switch lower(opts.lr_scheme)
@@ -456,18 +400,18 @@ function lr = local_learning_rate(opts,t)
 
         case 'cosine'
             lr = opts.lr_min ...
-                + 0.5*(opts.lr-opts.lr_min)*(1+cos(pi*progress));
+                + 0.5 * (opts.lr - opts.lr_min) * (1 + cos(pi*progress));
 
         case 'hold_cosine'
             if progress <= opts.lr_hold
                 lr = opts.lr;
             else
-                decayProgress = (progress-opts.lr_hold) ...
-                    / max(1-opts.lr_hold,eps);
+                decayProgress = (progress - opts.lr_hold) ...
+                    / max(1 - opts.lr_hold,eps);
                 decayProgress = min(max(decayProgress,0),1);
                 lr = opts.lr_min ...
-                    + 0.5*(opts.lr-opts.lr_min) ...
-                    *(1+cos(pi*decayProgress));
+                    + 0.5 * (opts.lr - opts.lr_min) ...
+                    * (1 + cos(pi * decayProgress));
             end
 
         otherwise
@@ -514,7 +458,7 @@ function local_validate_gradient(g,phi)
         if any(~isfinite(g.W{li}),'all') ...
                 || any(~isfinite(g.b{li}),'all')
             error(['      Error: descent(''dyn''): ' ...
-                'non-finite ANN gradient ' ...
+                'non-finite FFN gradient ' ...
                 'received in layer %d.'],li);
         end
     end
@@ -543,8 +487,8 @@ function phi = local_validate_phi_struct(phi)
     end
 
     phi.layers = double(phi.layers(:).');
-    nL = numel(phi.layers)-1;
-    nH = nL-1;
+    nL = numel(phi.layers) - 1;
+    nH = nL - 1;
 
     if nH < 1 || nH > 5 ...
             || numel(phi.W) ~= nL ...
@@ -579,61 +523,6 @@ function value = local_positive_integer(value,name)
             '%s must be a positive integer.'],name);
     end
     value = double(value);
-end
-
-function h = local_parse_hidden_widths(hin)
-%LOCAL_PARSE_HIDDEN_WIDTHS Convert hidden widths to a numeric row vector.
-
-    while iscell(hin) ...
-            && isscalar(hin)
-        hin = hin{1};
-    end
-
-    if isnumeric(hin)
-        h = double(hin(:).');
-    elseif isstring(hin)
-        if isscalar(hin)
-            h = str2num(char(hin)); %#ok<ST2NM>
-        else
-            h = str2double(hin(:).');
-        end
-    elseif ischar(hin)
-        h = str2num(hin); %#ok<ST2NM>
-    elseif iscell(hin)
-        h = nan(1,numel(hin));
-        for k = 1:numel(hin)
-            x = hin{k};
-            while iscell(x) ...
-                    && isscalar(x)
-                x = x{1};
-            end
-            if isnumeric(x) ...
-                    && isscalar(x)
-                h(k) = double(x);
-            elseif (isstring(x) ...
-                    && isscalar(x)) || ischar(x)
-                h(k) = str2double(x);
-            else
-                error(['      Error: descent: ' ...
-                    'hidden-layer widths ' ...
-                    'must be numeric or text scalars.']);
-            end
-        end
-    else
-        error(['      Error: descent: ' ...
-            'net.h must be numeric, text, ' ...
-            'or a cell array.']);
-    end
-
-    h = double(h(:).');
-    if isempty(h) ...
-            || any(~isfinite(h)) ...
-            || any(h < 1) ...
-            || any(mod(h,1) ~= 0)
-        error(['      Error: descent: ' ...
-            'net.h must contain positive ' ...
-            'integers.']);
-    end
 end
 
 function tf = local_parse_transfer_functions(tfin,nH)
@@ -673,7 +562,8 @@ function tf = local_parse_transfer_functions(tfin,nH)
                     && isscalar(x)
                 x = x{1};
             end
-            if ~(ischar(x) || (isstring(x) ...
+            if ~(ischar(x) ...
+                    || (isstring(x) ...
                     && isscalar(x)))
                 error(['      Error: descent: ' ...
                     'transfer-function entries ' ...

@@ -86,10 +86,9 @@ function outFile = save_to_pptx(C,outFile)
                 C,tmpDir);
         end
 
-        previewPng = local_make_preview_png(C,tmpDir);
         mapsPng = local_make_region_zones_png(C,tmpDir);
         networkPng = local_make_network_png(C,tmpDir);
-        reportFiles = {networkPng; previewPng; mapsPng};
+        reportFiles = [{networkPng}; {mapsPng}];
         reportFiles = reportFiles(~cellfun(@isempty,reportFiles));
         imgFiles = [reportFiles; imgFiles(:)];
     
@@ -187,42 +186,6 @@ function networkPng = local_make_network_png(C,tmpDir)
             '%s\n'],ME.message);
     end
 
-end
-
-function previewPng = local_make_preview_png(C,tmpDir)
-%LOCAL_MAKE_PREVIEW_PNG Render the GUI Preview text as a report slide.
-
-    previewPng = '';
-    try
-        if isempty(C) || ~isfield(C,'runtime') ...
-                || ~isfield(C.runtime,'previewText') ...
-                || isempty(C.runtime.previewText)
-            return
-        end
-
-        value = string(C.runtime.previewText(:));
-        value = value(strlength(value) > 0);
-        if isempty(value)
-            return
-        end
-
-        previewPng = fullfile(tmpDir,'preview_text.png');
-        fig = figure('Visible','off','Color','w','Units','pixels', ...
-            'Position',[100 100 1600 900],'PaperPositionMode','auto');
-        ax = axes(fig,'Position',[0 0 1 1]);
-        axis(ax,'off');
-        text(ax,0.04,0.95,'SAGE configuration preview', ...
-            'Units','normalized','FontSize',24,'FontWeight','bold', ...
-            'Interpreter','none','VerticalAlignment','top');
-        text(ax,0.04,0.89,char(join(value,newline)), ...
-            'Units','normalized','FontName','Consolas','FontSize',10, ...
-            'Interpreter','none','VerticalAlignment','top');
-        exportgraphics(fig,previewPng,'Resolution',150, ...
-            'BackgroundColor','white','ContentType','image');
-        close(fig);
-    catch
-        previewPng = '';
-    end
 end
 
 function mapsPng = local_make_region_zones_png(C,tmpDir)
@@ -401,8 +364,19 @@ function imgFiles = local_export_figures_to_png(figs,tmpDir)
                 scale = min([1, ...
                     maxWidth/max(pos(3),1), ...
                     maxHeight/max(pos(4),1)]);
-                pos(3:4) = max(1,round(pos(3:4)*scale));
-                f.Position = pos;
+                % Live diagnostics must keep the on-screen text/axes ratio.
+                % Shrinking the canvas alone leaves point-sized fonts fixed
+                % and makes them appear enlarged in the PowerPoint image.
+                preserveSize = contains(lower(local_fig_name(f)), ...
+                    'sage diagnostics');
+                if isappdata(f,'SAGEPreserveCaptureSize')
+                    preserveSize = preserveSize || ...
+                        logical(getappdata(f,'SAGEPreserveCaptureSize'));
+                end
+                if ~preserveSize
+                    pos(3:4) = max(1,round(pos(3:4)*scale));
+                    f.Position = pos;
+                end
                 drawnow;
                 clear cleanupUnits
             catch
@@ -557,9 +531,23 @@ function local_write_pptx_from_png(C, ...
                 pres,ppLayoutBlank,C);
             pause(0.2);
 
+            % Reproduce the complete GUI Preview tab.  It is deliberately
+            % split across slides: fitting this audit onto one slide either
+            % clips the final sections or makes the text uncomfortably large
+            % after PowerPoint rescales the text box.
+            local_add_preview_slides( ...
+                pres,ppLayoutBlank,C);
+            pause(0.2);
+
             % Place the screening audit immediately after the run settings
             % and before model diagrams or performance results.
             local_add_data_quality_slide( ...
+                pres,ppLayoutBlank,C);
+            pause(0.2);
+
+            % Keep the complete audit readable and separate from the run
+            % settings. This is added after Data-quality screening.
+            local_add_run_notes_slide( ...
                 pres,ppLayoutBlank,C);
             pause(0.2);
 
@@ -799,6 +787,78 @@ function local_write_pdf_from_png(pdfFile, ...
     end
 end
 
+function local_add_preview_slides(pres,ppLayoutBlank,C)
+%LOCAL_ADD_PREVIEW_SLIDES Add the complete GUI Preview tab over several slides.
+
+    if ~isfield(C,'runtime') || ~isstruct(C.runtime) ...
+            || ~isfield(C.runtime,'previewText') ...
+            || isempty(C.runtime.previewText)
+        return
+    end
+
+    previewText = C.runtime.previewText;
+    if ischar(previewText)
+        previewLines = cellstr(splitlines(string(previewText)));
+    elseif isstring(previewText)
+        previewLines = cellstr(previewText(:));
+    elseif iscell(previewText)
+        previewLines = cellfun(@(value)char(string(value)), ...
+            previewText(:),'UniformOutput',false);
+    else
+        previewLines = cellstr(string(previewText(:)));
+    end
+    if isempty(previewLines)
+        return
+    end
+
+    % The heading already identifies the section, so omit the formatter's
+    % duplicate first line when present.  All configuration lines and blank
+    % separators are retained exactly as displayed in the GUI.
+    if strcmpi(strtrim(previewLines{1}),'SAGE configuration preview')
+        previewLines(1) = [];
+    end
+    if isempty(previewLines)
+        return
+    end
+
+    linesPerSlide = 28;
+    pageCount = ceil(numel(previewLines)/linesPerSlide);
+    for page = 1:pageCount
+        firstLine = (page-1)*linesPerSlide + 1;
+        lastLine = min(page*linesPerSlide,numel(previewLines));
+        pageText = strjoin(previewLines(firstLine:lastLine),newline);
+
+        slides = get(pres,'Slides');
+        slideCount = get(slides,'Count');
+        slide = invoke(slides,'Add',slideCount+1,ppLayoutBlank);
+        shapes = get(slide,'Shapes');
+        slideW = get(pres.PageSetup,'SlideWidth');
+        slideH = get(pres.PageSetup,'SlideHeight');
+
+        titleBox = invoke(shapes,'AddTextbox',1,40,25,slideW-80,38);
+        if pageCount == 1
+            titleText = 'Configuration preview';
+        else
+            titleText = sprintf('Configuration preview (%d/%d)', ...
+                page,pageCount);
+        end
+        titleBox.TextFrame.TextRange.Text = titleText;
+        titleBox.TextFrame.TextRange.Font.Size = 24;
+        titleBox.TextFrame.TextRange.Font.Bold = 1;
+
+        previewBox = invoke(shapes,'AddTextbox', ...
+            1,45,70,slideW-90,slideH-95);
+        previewBox.TextFrame.TextRange.Text = pageText;
+        previewBox.TextFrame.TextRange.Font.Name = 'Consolas';
+        previewBox.TextFrame.TextRange.Font.Size = 10;
+        previewBox.TextFrame.WordWrap = -1;
+        previewBox.TextFrame.MarginLeft = 6;
+        previewBox.TextFrame.MarginRight = 6;
+        previewBox.TextFrame.MarginTop = 4;
+        previewBox.TextFrame.MarginBottom = 4;
+    end
+end
+
 function titlePng = local_make_title_png(C,tmpDir)
 %LOCAL_MAKE_TITLE_PNG Create a raster title page for PDF fallback.
 
@@ -836,12 +896,12 @@ function titlePng = local_make_title_png(C,tmpDir)
         trainPeriodStr,evalPeriodStr,spinupStr, ...
         splitStr,sampleStr);
 
-    text(0.05,0.92,'SAGE results', ...
+    text(0.05,0.96,'SAGE results', ...
         'FontSize',28, ...
         'FontWeight','bold', ...
         'Interpreter','none');
     
-    text(0.05,0.82,txt, ...
+    text(0.05,0.87,txt, ...
         'FontSize',14, ...
         'Interpreter','none', ...
         'VerticalAlignment','top');
@@ -930,9 +990,11 @@ function local_add_title_slide(pres,ppLayoutBlank,C)
     
     slideW = get(pres.PageSetup, ...
         'SlideWidth');
+    slideH = get(pres.PageSetup, ...
+        'SlideHeight');
     
     titleBox = invoke(shapes, ...
-        'AddTextbox',1,40,35,slideW-80,45);
+        'AddTextbox',1,40,10,slideW-80,45);
     titleBox.TextFrame.TextRange.Text = 'SAGE results';
     titleBox.TextFrame.TextRange.Font.Size = 28;
     titleBox.TextFrame.TextRange.Font.Bold = 1;
@@ -965,23 +1027,10 @@ function local_add_title_slide(pres,ppLayoutBlank,C)
         splitStr,sampleStr);
     
     textBox = invoke(shapes,'AddTextbox', ...
-        1,60,90,slideW-120,335);
+        1,60,78,slideW-120,slideH-88);
     textBox.TextFrame.TextRange.Text = txt;
     textBox.TextFrame.TextRange.Font.Size = 11;
     
-    note = local_run_note_string(C);
-    if strlength(note) > 0
-        if strlength(note) > 1000
-            note = extractBefore(note,1000) + " ...";
-        end
-    
-        noteBox = invoke(shapes, ...
-            'AddTextbox',1,60,430,slideW-120,90);
-        noteBox.TextFrame.TextRange.Text = ...
-            ['Run note:' newline char(note)];
-        noteBox.TextFrame.TextRange.Font.Size = 11;
-        noteBox.TextFrame.TextRange.Font.Italic = 1;
-    end
 end
 
 function local_add_data_quality_slide(pres,ppLayoutBlank,C)
@@ -1004,23 +1053,67 @@ function local_add_data_quality_slide(pres,ppLayoutBlank,C)
     if numel(forcingComplete) ~= numel(dischargeComplete)
         return
     end
-    badForcing = ~forcingComplete;
-    badDischarge = ~dischargeComplete;
     requestedK = double(dq.requested_K);
     requestedKt = double(dq.requested_K_t);
     requestedKe = double(dq.requested_K_e);
     isTrain = false(requestedK,1);
     isTrain(1:min(requestedKt,requestedK)) = true;
     isEval = ~isTrain;
-    forcingMask = badForcing & ~badDischarge;
-    dischargeMask = ~badForcing & badDischarge;
-    bothMask = badForcing & badDischarge;
-    forcingCount = [nnz(forcingMask),nnz(forcingMask & isTrain), ...
-        nnz(forcingMask & isEval)];
-    dischargeCount = [nnz(dischargeMask),nnz(dischargeMask & isTrain), ...
-        nnz(dischargeMask & isEval)];
-    bothCount = [nnz(bothMask),nnz(bothMask & isTrain), ...
-        nnz(bothMask & isEval)];
+    excludedRaw = ~forcingComplete | ~dischargeComplete;
+    if isfield(dq,'eligible') && numel(dq.eligible) == requestedK
+        excludedRaw = ~logical(dq.eligible(:));
+    end
+    mismatchRaw = false(requestedK,1);
+    if isfield(dq,'meteo_bad_consistent') ...
+            && numel(dq.meteo_bad_consistent) == requestedK
+        mismatchRaw = mismatchRaw | ~logical(dq.meteo_bad_consistent(:));
+    end
+    if isfield(dq,'q_bad_consistent') ...
+            && numel(dq.q_bad_consistent) == requestedK
+        mismatchRaw = mismatchRaw | ~logical(dq.q_bad_consistent(:));
+    end
+    alertRaw = false(requestedK,1);
+    if isfield(dq,'hydrologic_flag') ...
+            && numel(dq.hydrologic_flag) == requestedK
+        alertRaw = alertRaw | logical(dq.hydrologic_flag(:));
+    end
+    if isfield(dq,'hydrologic_alert_uncertain') ...
+            && numel(dq.hydrologic_alert_uncertain) == requestedK
+        alertRaw = alertRaw | logical(dq.hydrologic_alert_uncertain(:));
+    end
+    lowRaw = false(requestedK,1);
+    coverageFields = {'coverage_p','coverage_ep','coverage_t','coverage_q'};
+    if all(isfield(dq,coverageFields)) ...
+            && all(cellfun(@(name)numel(dq.(name)) == requestedK, ...
+            coverageFields))
+        qTrain = double(dq.coverage_q(:));
+        qEval = qTrain;
+        if isfield(dq,'coverage_q_train') ...
+                && numel(dq.coverage_q_train) == requestedK
+            qTrain = double(dq.coverage_q_train(:));
+        end
+        if isfield(dq,'coverage_q_eval') ...
+                && numel(dq.coverage_q_eval) == requestedK
+            qEval = double(dq.coverage_q_eval(:));
+        end
+        qOperative = qTrain;
+        qOperative(isEval) = qEval(isEval);
+        coverage = [double(dq.coverage_p(:)), ...
+            double(dq.coverage_ep(:)),double(dq.coverage_t(:)),qOperative];
+        lowRaw = any(coverage < 30 | ~isfinite(coverage),2);
+    end
+    excludedMask = excludedRaw;
+    mismatchMask = mismatchRaw & ~excludedMask;
+    alertMask = alertRaw & ~mismatchRaw & ~excludedMask;
+    lowMask = lowRaw & ~alertRaw & ~mismatchRaw & ~excludedMask;
+    okMask = ~(excludedMask | mismatchMask | alertMask | lowMask);
+    statusMasks = {okMask,lowMask,alertMask,mismatchMask,excludedMask};
+    statusCounts = zeros(5,3);
+    for category = 1:5
+        mask = statusMasks{category};
+        statusCounts(category,:) = [nnz(mask),nnz(mask & isTrain), ...
+            nnz(mask & isEval)];
+    end
     activeKt = double(C.bas.K_t);
     activeKe = double(C.bas.K_e);
     activeK = activeKt + activeKe;
@@ -1038,8 +1131,8 @@ function local_add_data_quality_slide(pres,ppLayoutBlank,C)
     titleBox.TextFrame.TextRange.Font.Bold = 1;
 
     introBox = invoke(shapes,'AddTextbox',1,55,85,slideW-110,42);
-    introBox.TextFrame.TextRange.Text = [ ...
-        'The universal basin inventory is screened before SAGE training.'];
+    introBox.TextFrame.TextRange.Text = ...
+        'The universal basin inventory is screened before SAGE training.';
     introBox.TextFrame.TextRange.Font.Size = 16;
 
     requestedBox = invoke(shapes,'AddTextbox', ...
@@ -1069,25 +1162,24 @@ function local_add_data_quality_slide(pres,ppLayoutBlank,C)
     excludedBox.TextFrame.TextRange.Font.Color.RGB = 192;
 
     categoryTitle = invoke(shapes,'AddTextbox', ...
-        1,70,300,slideW-140,32);
+        1,70,290,slideW-140,32);
     categoryTitle.TextFrame.TextRange.Text = ...
-        'Mutually exclusive exclusion categories';
+        'Mutually exclusive screening categories';
     categoryTitle.TextFrame.TextRange.Font.Size = 18;
     categoryTitle.TextFrame.TextRange.Font.Bold = 1;
 
     % Use a native PowerPoint table rather than space-padded text. Font
     % metrics vary between PowerPoint installations and otherwise cause the
     % Total, Train, and Eval headings to drift away from their values.
-    tableShape = invoke(shapes,'AddTable',4,4,70,335,slideW-140,112);
+    tableShape = invoke(shapes,'AddTable',6,4,70,325,slideW-140,150);
     pptTable = get(tableShape,'Table');
     labels = { ...
-        'Criterion','Total','Train','Eval'; ...
-        'Incomplete meteorological forcing only', ...
-            forcingCount(1),forcingCount(2),forcingCount(3); ...
-        'Insufficient or constant discharge only', ...
-            dischargeCount(1),dischargeCount(2),dischargeCount(3); ...
-        'Both forcing and discharge criteria', ...
-            bothCount(1),bothCount(2),bothCount(3)};
+        'Status','Total','Train','Eval'; ...
+        'OK',statusCounts(1,1),statusCounts(1,2),statusCounts(1,3); ...
+        'Low coverage only',statusCounts(2,1),statusCounts(2,2),statusCounts(2,3); ...
+        'Hydrologic alert',statusCounts(3,1),statusCounts(3,2),statusCounts(3,3); ...
+        'Reader mismatch',statusCounts(4,1),statusCounts(4,2),statusCounts(4,3); ...
+        'Excluded',statusCounts(5,1),statusCounts(5,2),statusCounts(5,3)};
     try
         pptColumns = get(pptTable,'Columns');
         firstColumn = invoke(pptColumns,'Item',1);
@@ -1098,7 +1190,7 @@ function local_add_data_quality_slide(pres,ppLayoutBlank,C)
         end
     catch
     end
-    for row = 1:4
+    for row = 1:6
         for column = 1:4
             tableCell = invoke(pptTable,'Cell',row,column);
             cellShape = get(tableCell,'Shape');
@@ -1123,12 +1215,44 @@ function local_add_data_quality_slide(pres,ppLayoutBlank,C)
     end
 
     noteBox = invoke(shapes,'AddTextbox', ...
-        1,55,455,slideW-110,45);
+        1,55,485,slideW-110,40);
     noteBox.TextFrame.TextRange.Text = [ ...
         'Eligibility requires complete P, E_p, and T, plus at least 5% ' ...
         'finite, nonconstant discharge in both periods.'];
     noteBox.TextFrame.TextRange.Font.Size = 13;
     noteBox.TextFrame.TextRange.Font.Italic = 1;
+end
+
+function local_add_run_notes_slide(pres,ppLayoutBlank,C)
+%LOCAL_ADD_RUN_NOTES_SLIDE Add the complete run audit on its own slide.
+
+    note = strip(local_run_note_string(C));
+    if strlength(note) == 0
+        return
+    end
+
+    slides = get(pres,'Slides');
+    slideCount = get(slides,'Count');
+    slideIndex = slideCount + 1;
+    slide = invoke(slides,'Add',slideIndex,ppLayoutBlank);
+    shapes = get(slide,'Shapes');
+    slideW = get(pres.PageSetup,'SlideWidth');
+    slideH = get(pres.PageSetup,'SlideHeight');
+
+    titleBox = invoke(shapes,'AddTextbox',1,40,30,slideW-80,45);
+    titleBox.TextFrame.TextRange.Text = 'Run Notes';
+    titleBox.TextFrame.TextRange.Font.Size = 28;
+    titleBox.TextFrame.TextRange.Font.Bold = 1;
+
+    noteBox = invoke(shapes,'AddTextbox', ...
+        1,55,90,slideW-110,slideH-125);
+    noteBox.TextFrame.TextRange.Text = char(note);
+    noteBox.TextFrame.TextRange.Font.Size = 16;
+    noteBox.TextFrame.WordWrap = -1;
+    noteBox.TextFrame.MarginLeft = 8;
+    noteBox.TextFrame.MarginRight = 8;
+    noteBox.TextFrame.MarginTop = 6;
+    noteBox.TextFrame.MarginBottom = 6;
 end
 
 function [imgW,imgH] = local_graphic_size(imgFile)
@@ -1300,6 +1424,9 @@ function imgFile = local_find_model_diagram(C,preferSvg)
         case {'cfe_nwm','cfenwm'}
             svgName = 'cfe_nwm.svg';
             pngName = 'cfe_nwm.png';
+        case 'gchm'
+            svgName = 'SAGE_new_model.svg';
+            pngName = 'SAGE_new_model.png';
         case {'user_model','usermodel'}
             svgName = 'user_model.svg';
             pngName = 'user_model.png';
@@ -2464,6 +2591,7 @@ function txt = local_title_text(C,modelName,dtName,lossStr, ...
         '# hidden layers: %s\n' ...
         'Transfer function(s): %s\n' ...
         '# FFN parameters: %s\n' ...
+        'Initialization seed: %s\n' ...
         'Optimization method: %s\n' ...
         'Max iterations: %s\n' ...
         'Iterations done: %s\n' ...
@@ -2495,6 +2623,7 @@ function txt = local_title_text(C,modelName,dtName,lossStr, ...
         local_hidden_layers_string(C), ...
         local_transfer_string(C), ...
         local_nffn_parameters_string(C), ...
+        local_network_seed_string(C), ...
         local_optimizer_string(C), ...
         local_alg_field_string(C,'i_max'), ...
         local_iterations_done_string(C), ...
@@ -2509,6 +2638,29 @@ function txt = local_title_text(C,modelName,dtName,lossStr, ...
         local_phase_runtime_string(C,'gui'), ...
         local_phase_runtime_string(C,'total'), ...
         local_results_dir(C),createdStr);
+end
+
+function s = local_network_seed_string(C)
+%LOCAL_NETWORK_SEED_STRING Format the FFN initialization seed.
+    try
+        if isfield(C,'net') && isstruct(C.net) ...
+                && isfield(C.net,'seed') && ~isempty(C.net.seed)
+            seed = double(C.net.seed(1));
+        elseif isfield(C,'misc') && isstruct(C.misc) ...
+                && isfield(C.misc,'net') && isstruct(C.misc.net) ...
+                && isfield(C.misc.net,'seed') && ~isempty(C.misc.net.seed)
+            seed = double(C.misc.net.seed(1));
+        else
+            seed = 0;
+        end
+        if isfinite(seed) && seed >= 0
+            s = sprintf('%.0f',round(seed));
+        else
+            s = 'n/a';
+        end
+    catch
+        s = 'n/a';
+    end
 end
 
 function s = local_phase_runtime_string(C,name)

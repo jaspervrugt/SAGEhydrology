@@ -8,6 +8,7 @@
 
 #include "mex.h"
 #include "gr4jA.hpp"
+#include "../standalone_result.hpp"
 #include <algorithm>
 #include <cmath>
 #include <vector>
@@ -64,7 +65,8 @@ InputVector vector_view(const mxArray* a, const char* n)
 
 void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[])
 {
-    if (nrhs != 4 || nlhs > 4) {
+    const bool structured = nrhs == 5;
+    if ((nrhs != 4 && nrhs != 5) || (structured ? nlhs != 1 : nlhs > 4)) {
         mexErrMsgIdAndTxt("crr_gr4jA:Usage", "Need t_last,z0,data,options; <=4 outputs.");
     }
     const int ns = (int)std::llround(mxGetScalar(prhs[0]));
@@ -107,6 +109,7 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[])
     if (ma && !mxIsEmpty(ma)) {
         mem = (int)std::llround(mxGetScalar(ma));
     }
+    std::vector<std::string> on,jn,sn;bool wq=0,wj=0,ws=0,wjs=0,wm=0,wjm=0;if(structured){on=sage_standalone::names(prhs[4],"obs");jn=sage_standalone::names(prhs[4],"jac");sn=sage_standalone::names(prhs[4],"states");wq=sage_standalone::has(on,"Q")||sage_standalone::flag(prhs[4],"q");wj=sage_standalone::has(jn,"Q")||sage_standalone::flag(prhs[4],"jacobian");ws=sage_standalone::has(on,"SWE");wjs=sage_standalone::has(jn,"SWE");wm=sage_standalone::has(on,"SM");wjm=sage_standalone::has(jn,"SM");mem=sn.empty()?0:1;}
     int ipr = 1;
     const mxArray* ia = field(data, "ipr", false);
     if (ia && !mxIsEmpty(ia)) {
@@ -126,8 +129,9 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[])
     }
     const std::size_t zr = mem ? (std::size_t)(ns + 1) : 1u,
                       nq = (!mem && ipr <= ns) ? (std::size_t)(ns - ipr + 1) : 0u;
-    plhs[0] = mxCreateDoubleMatrix((mwSize)zr, (mwSize)nvar, mxREAL);
-    double *q = nullptr, *J = nullptr;
+    mxArray* Zmx = mxCreateDoubleMatrix((mwSize)zr, (mwSize)nvar, mxREAL);
+    if (!structured) plhs[0] = Zmx;
+    double *q=nullptr,*J=nullptr,*swe=nullptr,*Jswe=nullptr,*sm=nullptr,*Jsm=nullptr;std::vector<double> qb,Jb,sb,Jsb,mb,Jmb;
     if (nlhs >= 2) {
         plhs[1] = (!mem && nq) ? mxCreateDoubleMatrix((mwSize)nq, 1, mxREAL)
                                : mxCreateDoubleMatrix(0, 0, mxREAL);
@@ -142,11 +146,16 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[])
             J = mxGetPr(plhs[2]);
         }
     }
+    if(structured&&!mem){if(wq){qb.assign(nq,0);q=qb.data();}if(wj){Jb.assign(nq*d,0);J=Jb.data();}if(ws){sb.assign(nq,0);swe=sb.data();}if(wjs){Jsb.assign(nq*d,0);Jswe=Jsb.data();}if(wm){mb.assign(nq,0);sm=mb.data();}if(wjm){Jmb.assign(nq*d,0);Jsm=Jmb.data();}}
     sage_gr4ja::Forcing F{P.ptr, Ep.ptr, T.ptr, std::min(P.n, std::min(Ep.n, T.n))};
-    sage_gr4ja::OutputView O{mxGetPr(plhs[0]), q, J, zr, nvar, nq, (std::size_t)d};
+    sage_gr4ja::OutputView O{mxGetPr(Zmx), q, J, zr, nvar, nq, (std::size_t)d};
+    O.swe=swe;O.Jswe=Jswe;O.sm=sm;O.Jsm=Jsm;
     bool fail =
-        sage_gr4ja::run_into(ns, z0.ptr, z0.n, F, p, opt, mem != 0, ipr, nlhs >= 3, O);
-    if (nlhs >= 4) {
+        sage_gr4ja::run_into(ns,z0.ptr,z0.n,F,p,opt,mem!=0,ipr,structured?(wj||wjs||wjm):nlhs>=3,O);
+    if (structured) {
+        if(mem)plhs[0]=sage_standalone::result(prhs[4],mxGetPr(Zmx),zr,ns,ipr,m,d,fail,{1});else{std::vector<sage_standalone::OutputChannel> c{{"Q",q,J},{"SWE",swe,Jswe},{"SM",sm,Jsm}};plhs[0]=sage_standalone::result(prhs[4],c,nq,d,mxGetPr(Zmx),zr,ns,ipr,m,fail);}
+        mxDestroyArray(Zmx);
+    } else if (nlhs >= 4) {
         plhs[3] = mxCreateLogicalScalar(fail);
     }
 }

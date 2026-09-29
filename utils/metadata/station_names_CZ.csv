@@ -1,0 +1,216 @@
+gauge_id,gauge_name,river_name,source,match_distance_m
+B4403000,Kroměříž,Morava,CHMI HPPS,2.3
+B4412000,Zlín,Dřevnice,CHMI HPPS,10.1
+B4413000,Spytihněv,Morava,CHMI HPPS,9.7
+B4418000,Uherský Brod,Olšava,CHMI HPPS,7.9
+B4421500,Strážnice,Morava,CHMI HPPS,25.9
+B4422000,Strážnice,Velička,CHMI HPPS,3.8
+B4426000,Lanžhot,Morava,CHMI HPPS,33.0
+B4429000,Janov,Moravská Dyje,CHMI HPPS,5.1
+B4430000,Podhradí nad Dyjí,Dyje,CHMI HPPS,1.7
+B4432000,Vysočany,Želetavka,CHMI HPPS,13.9
+B4434000,Vranov - Hamry,Dyje,CHMI HPPS,9.5
+B4435000,Znojmo,Dyje,CHMI HPPS,6.9
+B4437000,Trávní Dvůr,Dyje,CHMI HPPS,9.3
+B4440000,Božice,Jevišovka,CHMI HPPS,5.6
+B4442000,Dalečín,Svratka,CHMI HPPS,5.3
+B4445000,Vír pod vyrovnávací nádrží,Svratka,CHMI HPPS,7.8
+B4447000,Dolní Loučky,Bobrůvka,CHMI HPPS,7.6
+B4448000,Veverská Bítýška,Svratka,CHMI HPPS,5.0
+B4457000,Bílovice nad Svitavou,Svitava,CHMI HPPS,6.8
+B4462000,Židlochovice,Svratka,CHMI HPPS,14.3
+B4469000,Ptáčov,Jihlava,CHMI HPPS,9.8
+B4473000,Nesměř,Oslava,CHMI HPPS,10.3
+B4474000,Oslavany,Oslava,CHMI HPPS,6.7
+B4477000,Moravský Krumlov,Rokytná,CHMI HPPS,1.9
+B4478000,Ivančice,Jihlava,CHMI HPPS,7.3
+B4480500,Břeclav-Ladná,Dyje,CHMI HPPS,0.0
+B6469500,Mohelno,Jihlava,CHMI HPPS,2.7
+B8449000,Brno - Poříčí (dočasně přesunuto),Svratka,CHMI HPPS,8.6
+B8453000,VD Letovice,Křetínka,CHMI HPPS,10.3
+B8471000,Mostiště pod přehradou,Oslava,CHMI HPPS,3.4
+B8479500,VD Nové Mlýny,Dyje,CHMI HPPS,36.7
+C4106000,Lenora,Teplá Vltava,CHMI HPPS,7.7
+C4107000,Chlum,Teplá Vltava,CHMI HPPS,6.9
+C4108000,Černý Kříž,Studená Vltava,CHMI HPPS,8.8
+C4109000,Vyšší Brod,Vltava,CHMI HPPS,18.2
+C4109500,Zátoň,Vltava,CHMI HPPS,4.3
+C4110200,Český Krumlov,Polečnice (Kájovský potok),CHMI HPPS,3.6
+C4111000,Březí,Vltava,CHMI HPPS,2.1
+C4112600,Pořešín,Malše,CHMI HPPS,2.2
+C4113000,Římov,Malše,CHMI HPPS,9.8
+C4115000,Roudné,Malše,CHMI HPPS,3.3
+C4115100,České Budějovice,Vltava,CHMI HPPS,2.9
+C4119000,Pilař,Lužnice,CHMI HPPS,6.8
+C4122000,Kazdovna,Lužnice,CHMI HPPS,8.3
+C4123000,Frahelž,Lužnice,CHMI HPPS,7.8
+C4124000,Rodvínov,Nežárka,CHMI HPPS,6.9
+C4126000,Oldřiš,Hamerský potok,CHMI HPPS,8.9
+C4127000,Lásenice,Nežárka,CHMI HPPS,27.1
+C4128000,Mláka,Nová řeka,CHMI HPPS,12.4
+C4129000,Hamr,Nežárka,CHMI HPPS,2.7
+C4131000,Klenovice,Lužnice,CHMI HPPS,7.1
+C4132500,Rataje,Smutná,CHMI HPPS,10.6
+C4133000,Bechyně,Lužnice,CHMI HPPS,5.3
+C4135000,Modrava,Vydra,CHMI HPPS,56.7
+C4136500,Stodůlky,Křemelná,CHMI HPPS,15.1
+C4138000,Sušice,Otava,CHMI HPPS,1.8
+C4139000,Kolinec,Ostružná,CHMI HPPS,6.8
+C4141000,Katovice,Otava,CHMI HPPS,4.8
+C4141700,Bohumilice,Spůlka,CHMI HPPS,11.6
+C4143000,Němětice,Volyňka,CHMI HPPS,1.6
+C4145000,Blanický mlýn,Blanice,CHMI HPPS,7.9
+C4147000,Podedvory,Blanice,CHMI HPPS,1.8
+C4148000,Husinec,Blanice,CHMI HPPS,38.0
+C4148500,Hracholusky,Zlatý potok,CHMI HPPS,11.0
+C4150000,Heřmaň,Blanice,CHMI HPPS,23.2
+C4151000,Písek,Otava,CHMI HPPS,5.2
+C4152000,Dolní Ostrovec,Lomnice,CHMI HPPS,23.0
+C4153000,Varvažov,Skalice,CHMI HPPS,14.2
+H4001000,Špindlerův Mlýn,Labe,CHMI HPPS,15.5
+H4002000,Labská,Labe,CHMI HPPS,7.3
+H4004200,Vestřev,Labe,CHMI HPPS,6.7
+H4006000,Les Království,Labe,CHMI HPPS,30.0
+H4013000,Horní Maršov,Úpa,CHMI HPPS,6.6
+H4014000,Horní Staré Město,Úpa,CHMI HPPS,6.4
+H4014100,Slatina nad Úpou,Úpa,CHMI HPPS,6.9
+H4014800,Zlíč,Úpa,CHMI HPPS,9.0
+H4017000,Maršov nad Metují,Metuje,CHMI HPPS,1.4
+H4018000,Hronov,Metuje,CHMI HPPS,2.1
+H4020000,Krčín,Metuje,CHMI HPPS,11.0
+H4023500,Orlické Záhoří,Divoká Orlice,CHMI HPPS,2.9
+H4027000,Slatina nad Zdobnicí,Zdobnice,CHMI HPPS,4.0
+H4028000,Kostelec nad Orlicí,Divoká Orlice,CHMI HPPS,7.2
+H4030000,Rychnov nad Kněžnou,Kněžná,CHMI HPPS,0.8
+H4034000,Dolní Libchavy,Tichá Orlice,CHMI HPPS,5.5
+H4035000,Ústí nad Orlicí,Třebovka,CHMI HPPS,10.2
+H4036000,Čermná nad Orlicí,Tichá Orlice,CHMI HPPS,4.0
+H4037000,Týniště nad Orlicí,Orlice,CHMI HPPS,10.3
+H4038000,Chábory,Dědina,CHMI HPPS,5.2
+H4039000,Mitrov,Dědina,CHMI HPPS,10.0
+H4042000,Němčice,Labe,CHMI HPPS,15.1
+H4043000,Litomyšl,Loučná,CHMI HPPS,0.0
+H4045000,Cerekvice nad Loučnou,Loučná,CHMI HPPS,2.2
+H4047000,Dašice,Loučná,CHMI HPPS,10.3
+H4048000,Hamry,Chrudimka,CHMI HPPS,2.3
+H4049000,Přemilov,Chrudimka,CHMI HPPS,35.4
+H4052000,Svídnice,Chrudimka,CHMI HPPS,48.2
+H4055500,Luže,Novohradka,CHMI HPPS,8.3
+H4058000,Úhřetice,Novohradka,CHMI HPPS,4.0
+H4059000,Nemošice,Chrudimka,CHMI HPPS,17.9
+H4061000,Přelouč,Labe,CHMI HPPS,0.0
+H4068000,Jičín,Cidlina,CHMI HPPS,9.5
+H4069000,Lázně Bělohrad,Javorka,CHMI HPPS,3.7
+H4070000,Nový Bydžov,Cidlina,CHMI HPPS,28.3
+H4071000,Rohoznice,Bystřice,CHMI HPPS,7.1
+H4075000,Sány,Cidlina,CHMI HPPS,6.3
+L4171000,Planá,Hamerský potok,CHMI HPPS,2.4
+L4172000,Třebel,Kosový potok,CHMI HPPS,3.6
+L4173000,Stříbro,Úhlavka,CHMI HPPS,9.7
+L4174000,Stříbro,Mže,CHMI HPPS,2.8
+L4175000,Trpísty,Úterský potok,CHMI HPPS,4.5
+L4176100,VD Hracholusky,Mže,CHMI HPPS,7.5
+L4178500,Tasnovice,Radbuza,CHMI HPPS,7.2
+L4179000,Staňkov,Radbuza,CHMI HPPS,10.4
+L4179900,Lhota,Radbuza,CHMI HPPS,4.5
+L4180100,VD České Údolí,Radbuza,CHMI HPPS,7.6
+L4182000,Tajanov,Úhlava,CHMI HPPS,13.6
+L4183000,Štěnovice,Úhlava,CHMI HPPS,7.7
+L4186000,Bílá Hora,Berounka,CHMI HPPS,8.6
+L4186500,Prádlo,Úslava,CHMI HPPS,5.1
+L4186800,Ždírec,Úslava,CHMI HPPS,7.8
+L4186900,Žákava,Bradava,CHMI HPPS,7.4
+L4187000,Koterov,Úslava,CHMI HPPS,26.4
+L4187500,Hrádek,Klabava,CHMI HPPS,7.0
+L4188000,Nová Huť,Klabava,CHMI HPPS,3.0
+L4189000,Čichořice,Střela,CHMI HPPS,3.7
+L4190000,Plasy,Střela,CHMI HPPS,9.6
+L4191000,Liblín,Berounka,CHMI HPPS,18.4
+L4191800,Rakovník,Rakovnický potok,CHMI HPPS,3.8
+L4196000,Čenkov,Litavka,CHMI HPPS,3.3
+L4198000,Beroun,Berounka,CHMI HPPS,20.3
+L8LUCI00,VD Lučina,Mže,CHMI HPPS,5.4
+L8NYRS00,VD Nýrsko,Úhlava,CHMI HPPS,8.1
+L8ZLUT00,VD Žlutice,Střela,CHMI HPPS,3.2
+O4257000,Svinov,Odra,CHMI HPPS,0.0
+O4263000,Krnov,Opava,CHMI HPPS,6.4
+O4266000,Opava,Opava,CHMI HPPS,0.0
+O4275000,Děhylov,Opava,CHMI HPPS,11.4
+O4293000,Ostrava,Ostravice,CHMI HPPS,0.0
+O4294000,Bohumín,Odra,CHMI HPPS,0.0
+O4303000,Věřňovice,Olše,CHMI HPPS,9.2
+O4304300,Osoblaha,Osoblaha,CHMI HPPS,0.0
+O4313000,Mikulovice,Bělá,CHMI HPPS,0.0
+O4345000,Raškov,Morava,CHMI HPPS,8.5
+O4350000,Šumperk tok,Desná,CHMI HPPS,4.9
+O4354000,Lupěné,Moravská Sázava,CHMI HPPS,0.0
+O4355000,Moravičany,Morava,CHMI HPPS,3.5
+O4360900,Loštice,Třebůvka,CHMI HPPS,0.0
+O4367000,Olomouc-Nové Sady tok,Morava,CHMI HPPS,0.0
+O4370500,Karolinka pod nádrží,Velká Stanovnice,CHMI HPPS,4.6
+O4378100,Ústí,Senice,CHMI HPPS,3.3
+O4379000,Vsetín,Vsetínská Bečva,CHMI HPPS,0.0
+O4382000,Jarcová,Vsetínská Bečva,CHMI HPPS,0.0
+O4386000,Rožnov pod Radhoštěm,Rožnovská Bečva,CHMI HPPS,0.0
+O4387000,Valašské Meziříčí,Rožnovská Bečva,CHMI HPPS,3.0
+O4388000,Kelč,Juhyně,CHMI HPPS,3.0
+O4389000,Teplice,Bečva,CHMI HPPS,0.0
+O4390000,Dluhonice,Bečva,CHMI HPPS,2.4
+O8SACE00,Šance pod nádrží,Ostravice,CHMI HPPS,7.7
+O8TERO00,Těrlicko pod nádrží,Stonávka,CHMI HPPS,0.0
+P4065000,Pařížov,Doubrava,CHMI HPPS,12.5
+P4066000,Žleby,Doubrava,CHMI HPPS,0.3
+P4077000,Vestec,Mrlina,CHMI HPPS,1.5
+P4082000,Plaňany,Výrovka,CHMI HPPS,10.5
+P4083000,Janov - Harrachov,Mumlava,CHMI HPPS,59.6
+P4084500,Jablonec nad Jizerou,Jizera,CHMI HPPS,0.0
+P4085000,Dolní Štěpanice,Jizerka,CHMI HPPS,3.5
+P4086000,Dolní Sytová,Jizera,CHMI HPPS,6.8
+P4091000,Železný Brod,Jizera,CHMI HPPS,2.4
+P4098000,Bakov nad Jizerou,Jizera,CHMI HPPS,6.4
+P4101800,Předměřice,Jizera,CHMI HPPS,8.2
+P4104400,Kostelec nad Labem,Labe,CHMI HPPS,17.6
+P4153900,Radíč,Mastník,CHMI HPPS,0.0
+P4154600,Štěchovice,Kocába,CHMI HPPS,0.0
+P4155800,Havlíčkův Brod - Pohledští Dvořáci,Sázava,CHMI HPPS,6.8
+P4158000,Chlístov,Sázava,CHMI HPPS,0.0
+P4161000,Zruč nad Sázavou,Sázava,CHMI HPPS,15.8
+P4161900,Milotice,Jankovský potok,CHMI HPPS,2.8
+P4163200,Nesměřice,Želivka,CHMI HPPS,11.3
+P4165000,Kácov,Sázava,CHMI HPPS,8.0
+P4165600,Louňovice pod Blaníkem,Blanice,CHMI HPPS,9.6
+P4165800,Slověnice,Chotýšanka,CHMI HPPS,4.0
+P4166000,Radonice I,Blanice,CHMI HPPS,8.5
+P4167200,Nespeky,Sázava,CHMI HPPS,11.7
+P4200100,Praha - Chuchle,Vltava,CHMI HPPS,9.9
+P4203000,Vraňany,Vltava,CHMI HPPS,13.8
+P4204000,Mělník,Labe,CHMI HPPS,19.9
+P4219000,Louny,Ohře,CHMI HPPS,2.8
+P4221000,Ústí nad Labem,Labe,CHMI HPPS,2.4
+P4226000,Trmice,Bílina,CHMI HPPS,7.2
+P4239000,Benešov nad Ploučnicí,Ploučnice,CHMI HPPS,1.8
+P4240000,Děčín,Labe,CHMI HPPS,5.0
+P4244000,Hřensko,Kamenice,CHMI HPPS,4.2
+U4206000,VD Skalka,Ohře,CHMI HPPS,12.6
+U4207300,Citice,Ohře,CHMI HPPS,17.4
+U4208200,Svatava,Svatava,CHMI HPPS,9.8
+U4210100,Stará Role,Rolava,CHMI HPPS,3.2
+U4210900,Teplička,Teplá,CHMI HPPS,8.0
+U4212000,VD Březová,Teplá,CHMI HPPS,2.8
+U4214000,Karlovy Vary - Drahovice,Ohře,CHMI HPPS,21.1
+U4214500,Ostrov,Bystřice,CHMI HPPS,23.1
+U4216000,Žatec,Ohře,CHMI HPPS,11.6
+U4222900,Bílina,Bílina,CHMI HPPS,18.3
+U4231000,Stráž pod Ralskem,Ploučnice,CHMI HPPS,8.2
+U4232200,Mimoň,Ploučnice,CHMI HPPS,3.3
+U4234000,Zákupy,Svitavka,CHMI HPPS,1.2
+U4235000,Česká Lípa,Ploučnice,CHMI HPPS,1.1
+U4241000,Srbská Kamenice,Kamenice,CHMI HPPS,1.5
+U4314000,Proseč nad Nisou,Lužická Nisa,CHMI HPPS,9.5
+U4316000,Liberec,Lužická Nisa,CHMI HPPS,2.2
+U4320000,Hrádek nad Nisou,Lužická Nisa,CHMI HPPS,7.1
+U4321000,Varnsdorf,Mandava,CHMI HPPS,40.0
+U4322000,Bílý Potok,Smědá,CHMI HPPS,4.7
+U4323000,Frýdlant,Smědá,CHMI HPPS,4.2
+U4324000,Višňová,Smědá,CHMI HPPS,40.7
+U4326000,Předlánce,Smědá,CHMI HPPS,7.7

@@ -1,42 +1,37 @@
-function eligibility = check_basins(dat,mdl,bas)
+function [eligibility,dat] = check_basins(dat,mdl,bas)
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%CHECK_BASINS Verify forcing and discharge eligibility of selected basins
+%CHECK_BASINS Check forcing and discharge eligibility.
 %
-% SYNOPSIS: eligibility = check_basins(dat,mdl,bas)
-%   dat         cell structure with basin-specific forcing and discharge
-%    {k}.meteo.P   meteorological precipitation vector for basin k
-%    {k}.meteo.Ep  potential evapotranspiration vector for basin k
-%    {k}.meteo.T   temperature vector for basin k
-%    {k}.y_n       observed discharge vector for basin k
-%   mdl         structure with model and split information
-%    .tout       number of meteorological time steps used by the model
-%    .id_train   training-period indices into observed discharge
-%    .id_eval    evaluation-period indices into observed discharge
-%   bas         basin structure
-%    .K          number of selected basins
-%   eligibility  basin-level data-quality structure
-%    .valid             true when forcing and discharge are complete
-%    .forcing_complete  true for finite P, Ep, and T over integration
-%    .discharge_complete true when scored discharge contains usable data
-%    .coverage_q_train   usable discharge coverage in training period (%)
-%    .coverage_q_eval    usable discharge coverage in evaluation period (%)
-%    .discharge_variable_train true when finite training Q is nonconstant
-%    .discharge_variable_eval  true when finite evaluation Q is nonconstant
-%    .discharge_variable true when Q is nonconstant in both periods
-%    .runoff_ratio_train long-term Q/P ratio in the training period
-%    .runoff_ratio_eval  long-term Q/P ratio in the evaluation period
-%    .hydrologic_alert   true when Q/P is outside the diagnostic range
-%    .documented_exclusion true for a region-configured excluded gauge
-%    .minimum_q_coverage minimum coverage required in each period (%)
-%    .reason            exclusion reason (empty for valid basins)
+%  Checks required inputs and records basin-level data quality.
+%
+% SYNOPSIS:
+%   [eligibility,dat] = check_basins(dat,mdl,bas)
+%
+% INPUT ARGUMENTS:
+%   dat             basin-specific forcing and observations
+%    {k}.meteo       P, Ep, and T forcing vectors
+%    {k}.obs.Q       observed discharge and metadata
+%   mdl             model and split settings
+%    .tout           number of integration time steps
+%    .id_train       training-period observation indices
+%    .id_eval        evaluation-period observation indices
+%   bas             basin selection
+%    .K              number of selected basins
+%
+% OUTPUT ARGUMENTS:
+%   eligibility     basin-level data-quality diagnostics
+%    .valid          true when required data are usable
+%    .forcing        finite required forcing over integration
+%    .discharge      usable and nonconstant scored discharge
+%    .coverage       training/evaluation discharge coverage (%)
+%    .runoff_ratio   discharge/precipitation diagnostic
+%    .alert          hydrologic or configured exclusion flags
+%    .reason         exclusion reason, empty for valid basins
+%   dat             validated basin data
 %
 % NOTES:
-%   1. Meteorological inputs must have mdl.tout entries because they include
-%      the full model integration window, including spin-up.
-%   2. Observed discharge must be long enough to support all training and
-%      evaluation indices used by the loss functions.
-%   3. This function is intended to catch reader/indexing inconsistencies
-%      immediately after read_Q and before prep_stats or model execution.
+%   The output also includes period-specific diagnostic fields. Forcing must
+%   span the full integration window, including spin-up.
 %
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % © Written by Jasper A. Vrugt, Apr. 2026 / updated Jun. 2026             %
@@ -64,7 +59,7 @@ function eligibility = check_basins(dat,mdl,bas)
         nP = numel(dat{k}.meteo.P);
         nT = numel(dat{k}.meteo.T);
         nE = numel(dat{k}.meteo.Ep);
-        nQ = numel(dat{k}.y_n);
+        nQ = numel(dat{k}.obs.Q.value);
     
         if nP ~= mdl.tout ...
                 || nT ~= mdl.tout ...
@@ -85,26 +80,44 @@ function eligibility = check_basins(dat,mdl,bas)
             any(~isfinite(dat{k}.meteo.P(:))) ...
             || any(~isfinite(dat{k}.meteo.Ep(:))) ...
             || any(~isfinite(dat{k}.meteo.T(:)));
+        if mdl.model == 11
+            if ~isfield(dat{k}.meteo,'LAI') ...
+                    || isempty(dat{k}.meteo.LAI)
+                % Jawad's documented no-canopy fallback: LAI=0 makes the
+                % vegetation fraction zero, so gchm reduces to its
+                % no-canopy structure without fabricating vegetation data.
+                dat{k}.meteo.LAI = 0;
+                dat{k}.meteo.LAI_mode = 'disabled';
+                dat{k}.meteo.LAI_source = ...
+                    'gchm fallback: canopy disabled';
+            end
+            if ~isnumeric(dat{k}.meteo.LAI) ...
+                    || ~ismember(numel(dat{k}.meteo.LAI),[1 mdl.tout]) ...
+                    || any(~isfinite(dat{k}.meteo.LAI(:)))
+                error(['gchm forcing error basin %d: LAI must be a finite ' ...
+                    'scalar or contain mdl.tout=%d values.'],k,mdl.tout);
+            end
+        end
 
         % Compute training/evaluation coverage separately. Basin-local
         % indices take precedence for rainfall-block splitting.
         idTrain = local_period_indices(dat{k},mdl,'train');
         idEval = local_period_indices(dat{k},mdl,'eval');
-        coverageQTrain(k) = local_q_coverage(dat{k}.y_n,idTrain);
-        coverageQEval(k) = local_q_coverage(dat{k}.y_n,idEval);
+        coverageQTrain(k) = local_q_coverage(dat{k}.obs.Q.value,idTrain);
+        coverageQEval(k) = local_q_coverage(dat{k}.obs.Q.value,idEval);
 
         % Use one paired basin population in every ECDF scenario. A basin
         % therefore needs sufficient, nonconstant discharge in both the
         % training and evaluation periods, irrespective of whether it is a
         % training or an evaluation basin spatially.
         dischargeVariableTrain(k) = local_q_is_variable( ...
-            dat{k}.y_n,idTrain);
+            dat{k}.obs.Q.value,idTrain);
         dischargeVariableEval(k) = local_q_is_variable( ...
-            dat{k}.y_n,idEval);
+            dat{k}.obs.Q.value,idEval);
         runoffRatioTrain(k) = local_runoff_ratio( ...
-            dat{k}.meteo.P,dat{k}.y_n,idTrain);
+            dat{k}.meteo.P,dat{k}.obs.Q.value,idTrain);
         runoffRatioEval(k) = local_runoff_ratio( ...
-            dat{k}.meteo.P,dat{k}.y_n,idEval);
+            dat{k}.meteo.P,dat{k}.obs.Q.value,idEval);
         if ~isempty(excludedGauge) && isfield(bas,'id_gauge') ...
                 && numel(bas.id_gauge) >= k
             gauge = local_normalize_gauge(bas.id_gauge(k));

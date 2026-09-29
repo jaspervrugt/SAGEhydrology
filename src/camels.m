@@ -1,113 +1,45 @@
 function varargout = camels(nTheta,mdl,dat,bas,ode,loss,misc,d,i,dirres)
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%CAMELS Runs the model for all K watersheds and returns the loss,
-% gradients, compact performance metrics, and optional parameter
-% attribution metrics.
+%CAMELS Evaluate all selected basins and aggregate results.
+%
+%  Runs basin models and returns objective values, gradients, metrics, and
+%  optional attribution diagnostics.
 %
 % SYNOPSIS:
-%  [ell,G,met] = camels(nTheta,mdl,dat,bas,ode,loss,misc,d,i,dirres)
-%  [ell,G,met,At,An] = camels(nTheta,mdl,dat,bas,ode,loss,misc,d,i,dirres)
-%  [ell,G,met,At,An,Qfdc] = camels(nTheta,mdl,dat,bas,ode,loss,misc,d, ...
-%   i,dirres)
-%   nTheta      d x K matrix normalized parameter values for K watersheds
-%   mdl         structure with model state/parameter info
-%    .model      choice of model
-%                 1 hymod
-%                 2 hmodel
-%                 3 sacsma
-%                 4 xinanjiang
-%                 5 gr4j
-%                 6 hbv
-%                 7 gr4jB [analytic routing]
-%    .mcode      scalar with numerical solution of watershed model
-%                 1 Runge Kutta implementation MATLAB
-%                 2 ode45 implementation MATLAB
-%                 3 Explicit Euler int_steps MATLAB
-%                 4 Runge Kutta implementation sacsma_ode C++
-%    .calc       model execution
-%      'seq'       sequential execution of watersheds
-%      'par'       parallel execution of watersheds using parfor
-%      'parfeval'  asynchronous parallel execution using batched parfeval
-%    .mode       assessment design
-%                 1 = training basins | training period
-%                 2 = training basins | evaluation period/mask
-%                 3 = training + evaluation basins | training period
-%                 4 = training + evaluation basins | evaluation period/mask
-%   dat         1 x K cell structure with forcing data for each watershed
-%   bas         structure with basin information
-%    .K          total number of CAMELS watersheds
-%                [671 = all CAMELS / 531 = daily-restricted / 516 = hourly]
-%    .K_t        number of training watersheds
-%    .K_e        number of evaluation watersheds
-%    .K          number of training + evaluation watersheds
-%    .r          number of basin attributes
-%    .id_t       K_t x 1 vector of training basin indices
-%    .id_e       K_e x 1 vector of evaluation basin indices
-%    .id_gauge   revised list of gauge basin codes
-%   ode         structure with ODE solver settings
-%    .InitStep   Initial time step
-%    .MaxStep    Maximum time step
-%    .MinStep    Minimum time step
-%    .RelTol     Relative tolerance
-%    .AbsTol     Absolute tolerance
-%    .Order      Order
-%    .maxiter    Maximum number of iterations
-%    .mem        memory storage [=1] of states or not [=0]
-%   loss        loss-function settings
-%    .fnc        scalar choice of loss function 
-%                  1 sum of absolute residuals
-%                  2 generalized least squares
-%                  3 Nash-Sutcliffe efficiency
-%                  4 Kling-Gupta efficiency
-%                  5 Huber loss
-%                  6 Flow duration curve loss
-%                  7 Jawad Kling-Gupta efficiency
-%    .n_win      for fnc = 7, moving-average window length in days
-%    .method     scalar JKGE benchmark method
-%                  1 = moving-average mean
-%                  2 = section-wise mean
-%                  3 = long-term mean
-%                  4 = monthly climatology
-%   misc        remaining miscellaneous runtime settings
-%    .io         output/logging
-%     .plopt      printing individual (=1) or one (=2) progress figure
-%     .file       0/1 write runtime+params file
-%    .attr       0/1 compute parameter attribution
-%    .crr_backend CRR execution backend
-%                  'cpp'    central native C++ backend (default)
-%                  'matlab' reference crr_model.m backend
-%   d           number of parameters
-%   i           descent iteration counter
-%   dirres      results directory
+%   [ell,G,met] = camels(nTheta,mdl,dat,bas,ode,loss,misc,d,i,dirres)
+%   [ell,G,met,At,An] = camels(...)
+%   [ell,G,met,At,An,Qfdc,loss,Aobs] = camels(...)
 %
-% OUTPUT:
-%   ell         1 x K vector with basin-wise training-period loss values
-%               ell(1:K_t)   = losses for training basins on train period
-%               ell(K_t+1:K) = losses for evaluation basins on train period
-%   G           d x K_t matrix gradients of training watersheds
-%   met         compact metrics for all K basins
-%    .loss.t     training-period losses: SAR, GLS, Huber and RSS
-%    .loss.e     evaluation-period losses: SAR, GLS, Huber and RSS
-%    .performance.t training-period scores: NSE, KGE and JKGE
-%    .performance.e evaluation-period scores: NSE, KGE and JKGE
-%   At          OPTIONAL OUTPUT: d x K_t matrix time-weighted parameter
-%                attribution values retained for training watersheds only
-%   An          OPTIONAL OUTPUT: d x K_t matrix net gradient-based
-%                attribution values retained for training watersheds only
-%   Qfdc        OPTIONAL OUTPUT: retained discharge series for selected
-%               postprocessor basins
-%    .id         retained basin indices
-%    .gauge       retained basin gauge identifiers
-%    .req        requested scenario memberships (.tt,.te,.et,.ee)
-%    .qy         1 x nKeep cell array with [q y] for each retained basin
+% INPUT ARGUMENTS:
+%   nTheta          d-by-K normalized hydrologic parameters
+%   mdl             model, execution, and assessment settings
+%    .model          hydrologic model identifier
+%    .mcode          numerical implementation
+%    .calc           sequential or parallel execution
+%    .mode           basin/period assessment design
+%   dat             basin-specific forcing and observations
+%   bas             training/evaluation basin counts and IDs
+%   ode             numerical solver settings
+%   loss            loss function and named-observation settings
+%   misc            runtime and backend settings
+%   d               number of hydrologic parameters
+%   i               training iteration number
+%   dirres          results directory
+%
+% OUTPUT ARGUMENTS:
+%   ell             basin-wise objective values
+%   G               hydrologic-parameter gradients
+%   met             compact basin-wise performance metrics
+%   At              optional attribution values
+%   An              optional net attribution values
+%   Qfdc            optional flow-duration-curve results
+%   loss            updated loss settings
+%   Aobs            optional observation attribution
+%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-% © Written by Jasper A. Vrugt, Dec. 2025 / updated Apr. 2026             %
-% University of California, Irvine                                        %
+% © Written by Jasper A. Vrugt, Dec. 2025 / updated Aug. 2026             %
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-    % ---------------------
-    % Unpack basin settings
-    % ---------------------
     if ~isstruct(bas) ...
             || ~isfield(bas,'K') ...
             || ~isfield(bas,'K_t')
@@ -163,8 +95,7 @@ function varargout = camels(nTheta,mdl,dat,bas,ode,loss,misc,d,i,dirres)
         attr = 0;
     else
         attr = double(misc.attr ~= 0);
-    end
-    
+    end    
     
     % --------------------------------
     % Select CRR execution backend
@@ -172,8 +103,9 @@ function varargout = camels(nTheta,mdl,dat,bas,ode,loss,misc,d,i,dirres)
     % 'cpp'    : central native crr_model_mex via crr_model_cpp
     % 'matlab' : reference crr_model.m implementation
     %
-    % The C++ router itself retains the MATLAB fallback for user_model and
-    % any execution mode that is not supported by the native backend.
+    % Backend preparation retains the MATLAB fallback for user_model,
+    % optional models not compiled into crr_model_mex, and any execution
+    % mode that is not supported by the native backend.
     if ~isfield(misc,'crr_backend') ...
             || isempty(misc.crr_backend)
         crr_backend = 'cpp';
@@ -232,12 +164,14 @@ function varargout = camels(nTheta,mdl,dat,bas,ode,loss,misc,d,i,dirres)
     
     fields = {'SARt','GLSt','NSEt', ...
               'KGEt','KGE_rt','KGE_alphat','KGE_betat', ...
-              'Hubert','RSSt','Dfdct','JKGEt', ...
+              'Hubert','RSSt','Dfdct','Dpt','Dlogpt','JKGEt', ...
               'JKGE_Mt','JKGE_Vt','JKGE_Ct', ...
               'SARe','GLSe','NSEe', ...
               'KGEe','KGE_re','KGE_alphae','KGE_betae', ...
-              'Hubere','RSSe','Dfdce','JKGEe', ...
+              'Hubere','RSSe','Dfdce','Dpe','Dlogpe','JKGEe', ...
               'JKGE_Me','JKGE_Ve','JKGE_Ce'};
+    jointFields = local_joint_metric_fields();
+    fields = [fields jointFields];
     
     vals = repmat({nan(1,K)},1,numel(fields));
     met = cell2struct(vals,fields,2);
@@ -245,9 +179,11 @@ function varargout = camels(nTheta,mdl,dat,bas,ode,loss,misc,d,i,dirres)
     if attr
         At = nan(d,K);
         An = nan(d,K);
+        AobsTmp = cell(1,K);
     else
         At = [];
         An = [];
+        AobsTmp = {};
     end
     
     % -----------------------------------------
@@ -313,10 +249,6 @@ function varargout = camels(nTheta,mdl,dat,bas,ode,loss,misc,d,i,dirres)
     % ---------------------------------------
     % Check requested execution configuration
     % ---------------------------------------
-    req_crr = crr_request(struct('q',true, ...
-        'gradient',true, ...
-        'metrics',true, ...
-        'attribution',logical(attr)));
     switch calc
         case 'seq'
             % ok
@@ -347,6 +279,12 @@ function varargout = camels(nTheta,mdl,dat,bas,ode,loss,misc,d,i,dirres)
                 'Use ''seq'', ''par'', ' ...
                 'or ''parfeval''.'],calc);
     end
+
+    loss = local_prepare_loss_normalization( ...
+        loss,nTheta,mdl,dat,bas,ode, ...
+        crr_backend,calc,i);
+    req_crr = local_crr_request(loss,attr);
+
     % -------------------
     % Sequential solution
     % -------------------
@@ -380,25 +318,28 @@ function varargout = camels(nTheta,mdl,dat,bas,ode,loss,misc,d,i,dirres)
                     [ell(k),outk] = run_crr_local(crr_backend, ...
                         nTheta(:,k),mdl, ...
                         dat{k},ode,loss,req_crr);
-                    qk = outk.q;
+                    qk = local_output_q(outk);
                     G(:,k) = outk.gradient;
                     metk = outk.metrics;
                 else
                     [ell(k),outk] = run_crr_local(crr_backend, ...
                         nTheta(:,k),mdl, ...
                         dat{k},ode,loss,req_crr);
-                    qk = outk.q;
+                    qk = local_output_q(outk);
                     G(:,k) = outk.gradient;
                     metk = outk.metrics;
                     At(:,k) = outk.attribution.total;
                     An(:,k) = outk.attribution.net;
+                    AobsTmp{k} = local_observed_attribution( ...
+                        outk.attribution, ...
+                        local_observation_names(loss));
                 end
     
-                if storeQ ...
+                if storeQ && ~isempty(qk) ...
                         && keep_mask(k)
                     Qtmp{k} = ...
                         single([qk(:) , ...
-                        dat{k}.y_n(:)]);
+                        dat{k}.obs.Q.value(:)]);
                 end
     
                 for f = 1:numel(fields)
@@ -434,18 +375,19 @@ function varargout = camels(nTheta,mdl,dat,bas,ode,loss,misc,d,i,dirres)
             template = nan(1,K);
             SARt = template; GLSt = template; NSEt = template;
             KGEt = template; Hubert = template; RSSt = template;
-            Dfdct = template;
+            Dfdct = template; Dpt = template; Dlogpt = template;
             KGE_rt = template; KGE_alphat = template;
             KGE_betat = template; JKGEt = template;
             JKGE_Mt = template; JKGE_Vt = template;
             JKGE_Ct = template;
             SARe = template; GLSe = template; NSEe = template;
             KGEe = template; Hubere = template; RSSe = template;
-            Dfdce = template;
+            Dfdce = template; Dpe = template; Dlogpe = template;
             KGE_re = template; KGE_alphae = template;
             KGE_betae = template; JKGEe = template;
             JKGE_Me = template; JKGE_Ve = template;
             JKGE_Ce = template;
+            joint = nan(numel(jointFields),K);
     
             if attr == 0
                 parfor k = 1:K
@@ -453,14 +395,16 @@ function varargout = camels(nTheta,mdl,dat,bas,ode,loss,misc,d,i,dirres)
                     [ell(k),outk] = run_crr_local(crr_backend, ...
                         nTheta(:,k),mdl, ...
                         dat{k},ode,loss,req_crr);
-                    qk = outk.q;
+                    qk = local_output_q(outk);
                     G(:,k) = outk.gradient;
                     metk = outk.metrics;
-                    if storeQ ...
+                    joint(:,k) = local_joint_metric_vector( ...
+                        metk,jointFields);
+                    if storeQ && ~isempty(qk) ...
                             && keep_mask(k)
                         Qtmp{k} = ...
                             single([qk(:) , ...
-                            dat{k}.y_n(:)]);
+                            dat{k}.obs.Q.value(:)]);
                     end
     
                     if isfield(metk,'SARt')   
@@ -485,6 +429,8 @@ function varargout = camels(nTheta,mdl,dat,bas,ode,loss,misc,d,i,dirres)
                         RSSt(k) = metk.RSSt;   
                     end
                     Dfdct(k) = metk.Dfdct;
+                    Dpt(k) = metk.Dpt;
+                    Dlogpt(k) = metk.Dlogpt;
                     if isfield(metk,'JKGEt')   
                         JKGEt(k) = metk.JKGEt;   
                     end
@@ -514,6 +460,8 @@ function varargout = camels(nTheta,mdl,dat,bas,ode,loss,misc,d,i,dirres)
                         RSSe(k) = metk.RSSe;   
                     end
                     Dfdce(k) = metk.Dfdce;
+                    Dpe(k) = metk.Dpe;
+                    Dlogpe(k) = metk.Dlogpe;
                     if isfield(metk,'JKGEe')   
                         JKGEe(k) = metk.JKGEe;   
                     end
@@ -533,16 +481,21 @@ function varargout = camels(nTheta,mdl,dat,bas,ode,loss,misc,d,i,dirres)
                     [ell(k),outk] = run_crr_local(crr_backend, ...
                         nTheta(:,k),mdl, ...
                         dat{k},ode,loss,req_crr);
-                    qk = outk.q;
+                    qk = local_output_q(outk);
                     G(:,k) = outk.gradient;
                     metk = outk.metrics;
+                    joint(:,k) = local_joint_metric_vector( ...
+                        metk,jointFields);
                     At(:,k) = outk.attribution.total;
                     An(:,k) = outk.attribution.net;
-                    if storeQ ...
+                    AobsTmp{k} = local_observed_attribution( ...
+                        outk.attribution, ...
+                        local_observation_names(loss));
+                    if storeQ && ~isempty(qk) ...
                             && keep_mask(k)
                         Qtmp{k} = ...
                             single([qk(:) , ...
-                            dat{k}.y_n(:)]);
+                            dat{k}.obs.Q.value(:)]);
                     end
     
                     if isfield(metk,'SARt')  
@@ -567,6 +520,8 @@ function varargout = camels(nTheta,mdl,dat,bas,ode,loss,misc,d,i,dirres)
                         RSSt(k) = metk.RSSt;   
                     end
                     Dfdct(k) = metk.Dfdct;
+                    Dpt(k) = metk.Dpt;
+                    Dlogpt(k) = metk.Dlogpt;
                     if isfield(metk,'JKGEt')   
                         JKGEt(k) = metk.JKGEt;   
                     end
@@ -596,6 +551,8 @@ function varargout = camels(nTheta,mdl,dat,bas,ode,loss,misc,d,i,dirres)
                         RSSe(k) = metk.RSSe;   
                     end
                     Dfdce(k) = metk.Dfdce;
+                    Dpe(k) = metk.Dpe;
+                    Dlogpe(k) = metk.Dlogpe;
                     if isfield(metk,'JKGEe')   
                         JKGEe(k) = metk.JKGEe;   
                     end
@@ -610,14 +567,17 @@ function varargout = camels(nTheta,mdl,dat,bas,ode,loss,misc,d,i,dirres)
             end
             values = {SARt,GLSt,NSEt,KGEt, ...
                       KGE_rt,KGE_alphat,KGE_betat, ...
-                      Hubert,RSSt,Dfdct,JKGEt, ...
+                      Hubert,RSSt,Dfdct,Dpt,Dlogpt,JKGEt, ...
                       JKGE_Mt,JKGE_Vt,JKGE_Ct, ...
                       SARe,GLSe,NSEe,KGEe, ...
                       KGE_re,KGE_alphae,KGE_betae, ...
-                      Hubere,RSSe,Dfdce,JKGEe, ...
+                      Hubere,RSSe,Dfdce,Dpe,Dlogpe,JKGEe, ...
                       JKGE_Me,JKGE_Ve,JKGE_Ce};
-            for f = 1:numel(fields)
+            for f = 1:numel(values)
                 met.(fields{f}) = values{f};
+            end
+            for f = 1:numel(jointFields)
+                met.(jointFields{f}) = joint(f,:);
             end
     
         case 'parfeval'
@@ -631,7 +591,7 @@ function varargout = camels(nTheta,mdl,dat,bas,ode,loss,misc,d,i,dirres)
             template = nan(1,K);
             SARt = template; GLSt = template; NSEt = template;
             KGEt = template; Hubert = template; RSSt = template;
-            Dfdct = template;
+            Dfdct = template; Dpt = template; Dlogpt = template;
             KGE_rt = template; KGE_alphat = template;
             KGE_betat = template; JKGEt = template;
             JKGE_Mt = template; JKGE_Vt = template;
@@ -639,7 +599,7 @@ function varargout = camels(nTheta,mdl,dat,bas,ode,loss,misc,d,i,dirres)
     
             SARe = template; GLSe = template; NSEe = template;
             KGEe = template; Hubere = template; RSSe = template;
-            Dfdce = template;
+            Dfdce = template; Dpe = template; Dlogpe = template;
             KGE_re = template; KGE_alphae = template;
             KGE_betae = template; JKGEe = template;
             JKGE_Me = template; JKGE_Ve = template;
@@ -684,9 +644,10 @@ function varargout = camels(nTheta,mdl,dat,bas,ode,loss,misc,d,i,dirres)
                 storeMask_b = storeQ ...
                     & keep_mask(ids);
                 % Outputs:
-                % ids, ell_b, G_b, met_b, At_b, An_b, Q_b, runtime_b
+                % ids, ell_b, G_b, met_b, At_b, An_b, Aobs_b, Q_b,
+                % runtime_b
                 futures(b) = parfeval(pool, ...
-                    @run_basin_batch_local,8, ...
+                    @run_basin_batch_local,9, ...
                     ids,nTheta(:,ids),mdl,dat(ids),ode, ...
                     loss,attr,storeMask_b,crr_backend);
             end
@@ -697,7 +658,7 @@ function varargout = camels(nTheta,mdl,dat,bas,ode,loss,misc,d,i,dirres)
     
             for b = 1:nBatch
                 [~,ids,ell_b,G_b,met_b,At_b, ...
-                    An_b,Q_b,runtime_b] = ...
+                    An_b,Aobs_b,Q_b,runtime_b] = ...
                     fetchNext(futures);
                 nIds = numel(ids);
                 ell(ids) = ell_b;
@@ -705,9 +666,16 @@ function varargout = camels(nTheta,mdl,dat,bas,ode,loss,misc,d,i,dirres)
                 if attr
                     At(:,ids) = At_b;
                     An(:,ids) = An_b;
+                    AobsTmp(ids) = Aobs_b;
                 end
                 if prt_file
                     runtime(ids) = runtime_b;
+                end
+                for jf = 1:numel(jointFields)
+                    if isfield(met_b,jointFields{jf})
+                        met.(jointFields{jf})(ids) = ...
+                            met_b.(jointFields{jf});
+                    end
                 end
                 % Store retained FDC discharge series
                 if storeQ
@@ -743,6 +711,12 @@ function varargout = camels(nTheta,mdl,dat,bas,ode,loss,misc,d,i,dirres)
                 if isfield(met_b,'Dfdct')
                     Dfdct(ids) = met_b.Dfdct;
                 end
+                if isfield(met_b,'Dpt')
+                    Dpt(ids) = met_b.Dpt;
+                end
+                if isfield(met_b,'Dlogpt')
+                    Dlogpt(ids) = met_b.Dlogpt;
+                end
                 if isfield(met_b,'JKGEt')
                     JKGEt(ids) = met_b.JKGEt;
                 end
@@ -774,6 +748,12 @@ function varargout = camels(nTheta,mdl,dat,bas,ode,loss,misc,d,i,dirres)
                 if isfield(met_b,'Dfdce')
                     Dfdce(ids) = met_b.Dfdce;
                 end
+                if isfield(met_b,'Dpe')
+                    Dpe(ids) = met_b.Dpe;
+                end
+                if isfield(met_b,'Dlogpe')
+                    Dlogpe(ids) = met_b.Dlogpe;
+                end
                 if isfield(met_b,'JKGEe')
                     JKGEe(ids) = met_b.JKGEe;
                 end
@@ -797,13 +777,13 @@ function varargout = camels(nTheta,mdl,dat,bas,ode,loss,misc,d,i,dirres)
             end
             values = {SARt,GLSt,NSEt,KGEt, ...
                       KGE_rt,KGE_alphat,KGE_betat, ...
-                      Hubert,RSSt,Dfdct,JKGEt, ...
+                      Hubert,RSSt,Dfdct,Dpt,Dlogpt,JKGEt, ...
                       JKGE_Mt,JKGE_Vt,JKGE_Ct, ...
                       SARe,GLSe,NSEe,KGEe, ...
                       KGE_re,KGE_alphae,KGE_betae, ...
-                      Hubere,RSSe,Dfdce,JKGEe, ...
+                      Hubere,RSSe,Dfdce,Dpe,Dlogpe,JKGEe, ...
                       JKGE_Me,JKGE_Ve,JKGE_Ce};
-            for f = 1:numel(fields)
+            for f = 1:numel(values)
                 met.(fields{f}) = values{f};
             end
     end
@@ -838,6 +818,10 @@ function varargout = camels(nTheta,mdl,dat,bas,ode,loss,misc,d,i,dirres)
     if attr
         At = At(:,1:K_t);
         An = An(:,1:K_t);
+        Aobs = local_package_observation_attribution( ...
+            AobsTmp,local_observation_names(loss),d,K_t);
+    else
+        Aobs = [];
     end
     
     % -----------------------
@@ -855,11 +839,20 @@ function varargout = camels(nTheta,mdl,dat,bas,ode,loss,misc,d,i,dirres)
     
     % Present metrics through the public semantic schema. Worker-local
     % arrays remain flat to keep parfor/parfeval aggregation inexpensive.
-    met = local_package_metrics(met);
-    met.loss.fnc = loss.fnc;
-    met.loss.t.objective = ell;
+    met = local_package_metrics( ...
+        met,local_observation_names(loss));
+    met.info = struct('loss_fnc',loss.fnc, ...
+        'observed',{cellstr(local_observation_names(loss))});
+    if isfield(loss,'normalization')
+        met.info.normalization = loss.normalization;
+    end
+    met.total.loss.t = ell;
+    if attr
+        met.attribution = struct( ...
+            'total',At,'net',An,'observed',Aobs);
+    end
 
-    allout = {ell,G,met,At,An,Qfdc};
+    allout = {ell,G,met,At,An,Qfdc,loss,Aobs};
     varargout = allout(1:nargout);
 
 end
@@ -867,24 +860,22 @@ end
 % =============
 % local helpers
 % =============
-function met = local_package_metrics(flat)
+function met = local_package_metrics(flat,names)
 %LOCAL_PACKAGE_METRICS Organize public diagnostics by their meaning.
 
     met = struct();
-    met.loss = struct();
-    met.loss.t = struct( ...
+    qDiagnostic.t = struct( ...
         'SAR',flat.SARt, ...
         'GLS',flat.GLSt, ...
         'Huber',flat.Hubert, ...
         'RSS',flat.RSSt);
-    met.loss.e = struct( ...
+    qDiagnostic.e = struct( ...
         'SAR',flat.SARe, ...
         'GLS',flat.GLSe, ...
         'Huber',flat.Hubere, ...
         'RSS',flat.RSSe);
 
-    met.performance = struct();
-    met.performance.t = struct( ...
+    qPerformance.t = struct( ...
         'NSE',flat.NSEt, ...
         'KGE',flat.KGEt, ...
         'KGE_components',struct( ...
@@ -892,12 +883,14 @@ function met = local_package_metrics(flat)
             'alpha',flat.KGE_alphat, ...
             'beta',flat.KGE_betat), ...
         'D_fdc',flat.Dfdct, ...
+        'D_p',flat.Dpt, ...
+        'D_logp',flat.Dlogpt, ...
         'JKGE',flat.JKGEt, ...
         'JKGE_components',struct( ...
             'M',flat.JKGE_Mt, ...
             'V',flat.JKGE_Vt, ...
             'C',flat.JKGE_Ct));
-    met.performance.e = struct( ...
+    qPerformance.e = struct( ...
         'NSE',flat.NSEe, ...
         'KGE',flat.KGEe, ...
         'KGE_components',struct( ...
@@ -905,15 +898,66 @@ function met = local_package_metrics(flat)
             'alpha',flat.KGE_alphae, ...
             'beta',flat.KGE_betae), ...
         'D_fdc',flat.Dfdce, ...            
+        'D_p',flat.Dpe, ...
+        'D_logp',flat.Dlogpe, ...
         'JKGE',flat.JKGEe, ...
         'JKGE_components',struct( ...
             'M',flat.JKGE_Me, ...
             'V',flat.JKGE_Ve, ...
             'C',flat.JKGE_Ce));
+
+    met.variable = struct();
+    met.total = struct('loss',struct( ...
+        't',flat.JointLtot_t,'e',flat.JointLtot_e), ...
+        'contribution',struct('t',struct(),'e',struct()));
+    for j = 1:numel(names)
+        name = char(names(j));
+        met.total.contribution.t.(name) = ...
+            flat.(['JointC' name 't']);
+        met.total.contribution.e.(name) = ...
+            flat.(['JointC' name 'e']);
+        met.variable.(name) = struct();
+        met.variable.(name).loss = struct( ...
+            't',flat.(['JointL' name 't']), ...
+            'e',flat.(['JointL' name 'e']));
+        met.variable.(name).performance = struct( ...
+            't',local_named_performance(flat,name,'t'), ...
+            'e',local_named_performance(flat,name,'e'));
+        if strcmp(name,'Q')
+            met.variable.Q.diagnostic = qDiagnostic;
+            if isscalar(names)
+                % The Q-only backend returns the established compact
+                % discharge metrics. Named Q_* worker fields are populated
+                % only when the multi-observation evaluator is active.
+                met.variable.Q.performance = qPerformance;
+            end
+        end
+    end
+end
+
+function out = local_named_performance(flat,name,tag)
+%LOCAL_NAMED_PERFORMANCE Package named performance metrics for one period.
+
+    out = struct( ...
+        'NSE',flat.([name '_NSE' tag]), ...
+        'KGE',flat.([name '_KGE' tag]), ...
+        'KGE_components',struct( ...
+            'r',flat.([name '_KGE_r' tag]), ...
+            'alpha',flat.([name '_KGE_alpha' tag]), ...
+            'beta',flat.([name '_KGE_beta' tag])), ...
+        'D_fdc',flat.([name '_Dfdc' tag]), ...
+        'D_p',flat.([name '_Dp' tag]), ...
+        'D_logp',flat.([name '_Dlogp' tag]), ...
+        'JKGE',flat.([name '_JKGE' tag]), ...
+        'JKGE_components',struct( ...
+            'M',flat.([name '_JKGE_M' tag]), ...
+            'V',flat.([name '_JKGE_V' tag]), ...
+            'C',flat.([name '_JKGE_C' tag])));
 end
 
 function [keep_idx,req] = ...
     resolve_plot_basin_indices_local(misc,bas)
+%RESOLVE_PLOT_BASIN_INDICES_LOCAL Resolve retained plotting-basin requests.
 
     req = struct('tt',[],'te',[],'et',[],'ee',[]);
     flds = {'tt','te','et','ee'};
@@ -946,47 +990,28 @@ function [keep_idx,req] = ...
         % no return
     end
     
-    % ---------------------------------------
-    % Option 1: already provided as scenarios
-    % ---------------------------------------
-    if isfield(misc.plot,'kscen') ...
+    % Gauge IDs are canonical. Numeric indices are only a legacy fallback
+    % because data-quality screening can renumber the active population.
+    if isfield(misc.plot,'gaugescen') ...
+            && isstruct(misc.plot.gaugescen)
+        gauge_all = local_plot_basin_key(bas.id_gauge);
+        for ii = 1:numel(flds)
+            f = flds{ii};
+            if isfield(misc.plot.gaugescen,f) ...
+                    && ~isempty(misc.plot.gaugescen.(f))
+                gauge_req = local_plot_basin_key( ...
+                    misc.plot.gaugescen.(f));
+                [tf,loc] = ismember(gauge_req,gauge_all);
+                req.(f) = unique(loc(tf),'stable')';
+            end
+        end
+    elseif isfield(misc.plot,'kscen') ...
             && isstruct(misc.plot.kscen)
-    
         for ii = 1:numel(flds)
             f = flds{ii};
             if isfield(misc.plot.kscen,f) ...
                     && ~isempty(misc.plot.kscen.(f))
                 req.(f) = unique(double(misc.plot.kscen.(f)(:)))';
-            end
-        end
-    
-    % ----------------------------------
-    % Option 2: provided as gauge strings
-    % ----------------------------------
-    elseif isfield(misc.plot,'gaugescen') ...
-            && isstruct(misc.plot.gaugescen)
-    
-        % Normalize all available basin IDs to 8-character strings
-        gauge_all = string(bas.id_gauge);
-        % remove Excel-style .0 if present
-        gauge_all = regexprep(strtrim(gauge_all), '\.0$', '');   
-        % left-pad with zeros to width 8
-        gauge_all = compose("%08s", gauge_all);                 
-        % compose pads with spaces first
-        gauge_all = strrep(gauge_all, " ", "0");                
-    
-        for ii = 1:numel(flds)
-            f = flds{ii};
-            if isfield(misc.plot.gaugescen,f) ...
-                    && ~isempty(misc.plot.gaugescen.(f))
-    
-                gauge_req = string(misc.plot.gaugescen.(f));
-                gauge_req = regexprep(strtrim(gauge_req), '\.0$', '');
-                gauge_req = compose("%08s", gauge_req);
-                gauge_req = strrep(gauge_req, " ", "0");
-    
-                [tf,loc] = ismember(gauge_req,gauge_all);
-                req.(f) = unique(loc(tf))';
             end
         end
     end
@@ -1024,7 +1049,17 @@ function [keep_idx,req] = ...
 
 end
 
-function [ids,ell_b,G_b,met_b,At_b,An_b,Q_b,runtime_b] = ...
+function key = local_plot_basin_key(values)
+% Canonical, region-neutral key shared by GUI-selected and basin IDs.
+    key = upper(strip(string(values(:))));
+    key = regexprep(key,'\.0$','');
+    key = regexprep(key,'[^A-Z0-9]','');
+    numericOnly = ~cellfun('isempty', ...
+        regexp(cellstr(key),'^[0-9]+$','once'));
+    key(numericOnly) = regexprep(key(numericOnly),'^0+(?=[0-9])','');
+end
+
+function [ids,ell_b,G_b,met_b,At_b,An_b,Aobs_b,Q_b,runtime_b] = ...
     run_basin_batch_local(ids,nTheta_b,mdl,dat_b, ...
     ode,loss,attr,storeMask_b,crr_backend)
 %RUN_BASIN_BATCH_LOCAL Worker-side batch of basin model evaluations.
@@ -1042,12 +1077,13 @@ function [ids,ell_b,G_b,met_b,At_b,An_b,Q_b,runtime_b] = ...
 
     fields = {'SARt','GLSt','NSEt', ...
               'KGEt','KGE_rt','KGE_alphat','KGE_betat', ...
-              'Hubert','RSSt','Dfdct','JKGEt', ...
+              'Hubert','RSSt','Dfdct','Dpt','Dlogpt','JKGEt', ...
               'JKGE_Mt','JKGE_Vt','JKGE_Ct', ...
               'SARe','GLSe','NSEe', ...
               'KGEe','KGE_re','KGE_alphae','KGE_betae', ...
-              'Hubere','RSSe','Dfdce','JKGEe', ...
+              'Hubere','RSSe','Dfdce','Dpe','Dlogpe','JKGEe', ...
               'JKGE_Me','JKGE_Ve','JKGE_Ce'};
+    fields = [fields local_joint_metric_fields()];
 
     vals = repmat({nan(1,nb)},1,numel(fields));
     met_b = cell2struct(vals,fields,2);
@@ -1055,13 +1091,14 @@ function [ids,ell_b,G_b,met_b,At_b,An_b,Q_b,runtime_b] = ...
     if attr
         At_b = nan(d,nb);
         An_b = nan(d,nb);
+        Aobs_b = cell(1,nb);
     else
         At_b = [];
         An_b = [];
+        Aobs_b = {};
     end
 
-    req_crr = crr_request(struct('q',true,'gradient',true, ...
-        'metrics',true,'attribution',logical(attr)));
+    req_crr = local_crr_request(loss,attr);
     Q_b = cell(1,nb);
     runtime_b = nan(1,nb);
 
@@ -1087,19 +1124,21 @@ function [ids,ell_b,G_b,met_b,At_b,An_b,Q_b,runtime_b] = ...
         end
 
         if attr == 0
-            qj = outj.q;
+            qj = local_output_q(outj);
             G_b(:,jj) = outj.gradient;
             metj = outj.metrics;
         else
-            qj = outj.q;
+            qj = local_output_q(outj);
             G_b(:,jj) = outj.gradient;
             metj = outj.metrics;
             At_b(:,jj) = outj.attribution.total;
             An_b(:,jj) = outj.attribution.net;
+            Aobs_b{jj} = local_observed_attribution( ...
+                outj.attribution,local_observation_names(loss));
         end
 
-        if storeMask_b(jj)
-            Q_b{jj} = single([qj(:),dat_b{jj}.y_n(:)]);
+        if storeMask_b(jj) && ~isempty(qj)
+            Q_b{jj} = single([qj(:),dat_b{jj}.obs.Q.value(:)]);
         end
 
         for f = 1:numel(fields)
@@ -1140,6 +1179,9 @@ function [loss_value,out] = run_crr_local( ...
             error('camels:UnknownCRRBackend', ...
                 'Unknown CRR backend: %s',crr_backend);
     end
+
+    [loss_value,out] = local_combine_observations( ...
+        loss_value,out,dat,mdl,loss,request);
 end
 
 
@@ -1187,11 +1229,36 @@ function [loss_value,out] = local_invalid_basin_result(d,dat,request)
     out = struct();
     nQ = 0;
     if isstruct(dat) ...
-            && isfield(dat,'y_n')
-        nQ = numel(dat.y_n);
+            && isfield(dat,'obs') && isfield(dat.obs,'Q') ...
+            && isfield(dat.obs.Q,'value')
+        nQ = numel(dat.obs.Q.value);
     end
     if request.q
         out.q = nan(nQ,1);
+    end
+    if ~isempty(request.obs)
+        out.obs = struct();
+        for j = 1:numel(request.obs)
+            name = char(request.obs(j));
+            n = nQ;
+            if isfield(dat,'obs') && isfield(dat.obs,name) ...
+                    && isfield(dat.obs.(name),'value')
+                n = numel(dat.obs.(name).value);
+            end
+            out.obs.(name) = nan(n,1);
+        end
+    end
+    if ~isempty(request.jac)
+        out.jac = struct();
+        for j = 1:numel(request.jac)
+            name = char(request.jac(j));
+            n = nQ;
+            if isfield(dat,'obs') && isfield(dat.obs,name) ...
+                    && isfield(dat.obs.(name),'value')
+                n = numel(dat.obs.(name).value);
+            end
+            out.jac.(name) = nan(n,d);
+        end
     end
     if request.gradient
         out.gradient = nan(d,1);
@@ -1205,21 +1272,43 @@ function [loss_value,out] = local_invalid_basin_result(d,dat,request)
     if request.metrics
         fields = {'SARt','GLSt','NSEt', ...
             'KGEt','KGE_rt','KGE_alphat','KGE_betat', ...
-            'Hubert','RSSt','Dfdct','JKGEt', ...
+            'Hubert','RSSt','Dfdct','Dpt','Dlogpt','JKGEt', ...
             'JKGE_Mt','JKGE_Vt','JKGE_Ct', ...
             'SARe','GLSe','NSEe', ...
             'KGEe','KGE_re','KGE_alphae','KGE_betae', ...
-            'Hubere','RSSe','Dfdce','JKGEe', ...
+            'Hubere','RSSe','Dfdce','Dpe','Dlogpe','JKGEe', ...
             'JKGE_Me','JKGE_Ve','JKGE_Ce'};
+        fields = [fields local_joint_metric_fields()];
         out.metrics = cell2struct( ...
             repmat({NaN},size(fields)),fields,2);
     end
-    if request.attribution
+    if request.attribution ...
+            || local_wants_joint_attribution(request)
         out.attribution = struct( ...
             'total',nan(d,1),'net',nan(d,1));
+        if local_wants_joint_attribution(request)
+            out.attribution.observed = struct();
+            for j = 1:numel(request.obs)
+                name = char(request.obs(j));
+                out.attribution.observed.(name) = ...
+                    local_empty_attribution(d,NaN);
+            end
+        end
     end
 end
 
+
+function q = local_output_q(out)
+%LOCAL_OUTPUT_Q Return Q only when the model explicitly supplied it.
+
+    q = [];
+    if isstruct(out) && isfield(out,'q')
+        q = out.q;
+    elseif isstruct(out) && isfield(out,'obs') ...
+            && isfield(out.obs,'Q')
+        q = out.obs.Q;
+    end
+end
 
 function gauge = local_worker_gauge(dat)
 %LOCAL_WORKER_GAUGE Return a printable gauge identifier on a worker.
@@ -1244,4 +1333,696 @@ function gauge = local_worker_gauge(dat)
         gauge = char(strtrim(value));
     end
 
+end
+
+function request = local_crr_request(loss,attr)
+%LOCAL_CRR_REQUEST Request legacy or named multi-observation results.
+
+    names = local_observation_names(loss);
+    named = numel(names) > 1 || names(1) ~= "Q";
+    request = struct('q',any(names=="Q"),'gradient',true, ...
+        'metrics',true, ...
+        'attribution',logical(attr) && ~named);
+
+    if named
+        request.obs = names;
+        request.jac = names;
+    end
+
+    request = crr_request(request);
+    request.joint_attribution = logical(attr) && named;
+end
+
+function names = local_observation_names(loss)
+%LOCAL_OBSERVATION_NAMES Normalize selected loss observation names.
+
+    names = "Q";
+    if isfield(loss,'observed') ...
+            && ~isempty(loss.observed)
+        names = upper(strtrim(string(loss.observed(:))));
+        names = names(strlength(names) > 0);
+    end
+    names = unique(names,'stable');
+    if isempty(names)
+        names = "Q";
+    end
+    unknown = setdiff(names,["Q";"SWE";"SM"]);
+    if ~isempty(unknown)
+        error('camels:UnknownObservation', ...
+            'Unknown loss observation(s): %s.', ...
+            strjoin(cellstr(unknown),', '));
+    end
+end
+
+function [lossValue,out] = local_combine_observations( ...
+    lossValue,out,dat,mdl,loss,request)
+%LOCAL_COMBINE_OBSERVATIONS Form one weighted basin loss and gradient.
+
+    names = local_observation_names(loss);
+    if isscalar(names) ...
+            && names == "Q"
+        return
+    end
+    if ~isfield(out,'obs') ...
+            || ~isfield(out,'jac')
+        error('camels:MissingNamedResults', ...
+            ['The selected model backend did not return the named ' ...
+             'observations and Jacobians required by the loss.']);
+    end
+
+    n = numel(names);
+    weights = local_loss_vector(loss,'weight', ...
+        names,ones(n,1)/n);
+    scales = local_loss_scales(loss,names);
+    baseCoefficients = weights./scales;
+    hasCounts = isfield(loss,'normalization') ...
+        && isfield(loss.normalization,'n_basin') ...
+        && isfield(loss.normalization,'n_total');
+    if hasCounts
+        counts = local_loss_vector(loss.normalization, ...
+            'n_basin',names,ones(n,1));
+        baseCoefficients = baseCoefficients ...
+            .* double(loss.normalization.n_total) ...
+            ./ counts;
+    end
+
+    periods = {'train','eval'};
+    tags = {'t','e'};
+    result = struct();
+    for p = 1:2
+        values = nan(n,1);
+        gradients = cell(n,1);
+        details = cell(n,1);
+        available = false(n,1);
+
+        for j = 1:n
+            name = char(names(j));
+            gradients{j} = nan(size(out.gradient));
+            if isfield(out.obs,name) ...
+                    && isfield(out.jac,name)
+                [values(j),gradients{j},details{j}] = ...
+                    observation_loss(names(j),out.obs.(name), ...
+                    out.jac.(name),dat,loss,periods{p});
+                available(j) = details{j}.available;
+            end
+        end
+
+        coefficients = baseCoefficients;
+        if ~hasCounts && any(available)
+            activeWeight = weights;
+            activeWeight(~available) = 0;
+            activeWeight = activeWeight/sum(activeWeight);
+            coefficients = activeWeight./scales;
+        end
+
+        total = NaN;
+        contribution = nan(n,1);
+        if any(available)
+            contribution(available) = coefficients(available) ...
+                .* values(available);
+            total = sum(contribution(available));
+        end
+        result.(tags{p}) = struct( ...
+            'value',values,'gradient',{gradients}, ...
+            'detail',{details},'available',available, ...
+            'coefficient',coefficients, ...
+            'contribution',contribution,'total',total);
+    end
+
+    lossValue = result.t.total;
+    if ~any(result.t.available)
+        out.gradient(:) = NaN;
+    else
+        totalGradient = zeros(size(out.gradient));
+        for j = find(result.t.available(:))'
+            totalGradient = totalGradient ...
+                + result.t.coefficient(j) ...
+                * result.t.gradient{j};
+        end
+        out.gradient = totalGradient;
+    end
+
+    out.loss = struct();
+    out.gradient_observed = struct();
+    for j = 1:n
+        name = char(names(j));
+        out.loss.(name) = result.t.value(j);
+        out.gradient_observed.(name) = result.t.gradient{j};
+    end
+    out.loss_total = lossValue;
+    out.loss_weight = local_named_struct(names,weights);
+    out.loss_coefficient = local_named_struct( ...
+        names,result.t.coefficient);
+    out.loss_scale = local_named_struct(names,scales);
+    out.loss_available = local_named_struct( ...
+        names,result.t.available);
+
+    if ~isfield(out,'metrics') ...
+            || ~isstruct(out.metrics)
+        out.metrics = struct();
+    end
+    out.metrics = local_store_joint_metrics( ...
+        out.metrics,names,result);
+
+    if local_wants_joint_attribution(request)
+        out.attribution = local_joint_attribution( ...
+            out,result,names,mdl);
+    end
+end
+
+function tf = local_wants_joint_attribution(request)
+%LOCAL_WANTS_JOINT_ATTRIBUTION Test the CAMELS-side attribution flag.
+
+    tf = isfield(request,'joint_attribution') ...
+        && logical(request.joint_attribution);
+end
+
+function attribution = local_joint_attribution( ...
+    out,result,names,mdl)
+%LOCAL_JOINT_ATTRIBUTION Compute aggregate and named attributions.
+
+    d = numel(out.gradient);
+    s = mdl.th_max(:)-mdl.th_min(:);
+    if numel(s) ~= d
+        error('camels:AttributionParameterSize', ...
+            ['Parameter bounds do not match the ' ...
+             'multiple-observation gradient.']);
+    end
+
+    observed = struct();
+    contribution = [];
+    for j = 1:numel(names)
+        name = char(names(j));
+        if ~result.t.available(j)
+            observed.(name) = local_empty_attribution(d, ...
+                result.t.coefficient(j));
+            continue
+        end
+        J = double(out.jac.(name));
+        delta = result.t.detail{j}.delta(:);
+        if numel(delta) ~= size(J,1)
+            error('camels:AttributionSensitivitySize', ...
+                ['Loss sensitivity and Jacobian lengths ' ...
+                 'differ for %s.'],name);
+        end
+        [At,An] = sage_attribution( ...
+            J,delta,mdl,result.t.gradient{j});
+        coefficient = result.t.coefficient(j);
+        observed.(name) = struct( ...
+            'total',At,'net',An, ...
+            'weighted_total',abs(coefficient)*At, ...
+            'weighted_net',abs(coefficient)*An, ...
+            'coefficient',coefficient);
+        C = coefficient*(J.*delta);
+        if isempty(contribution)
+            contribution = zeros(size(C));
+        elseif ~isequal(size(contribution),size(C))
+            error('camels:AttributionTrajectorySize', ...
+                ['Named observation trajectories must have ' ...
+                 'equal lengths for aggregate attribution.']);
+        end
+        contribution = contribution+C;
+    end
+
+    if isempty(contribution) || any(~isfinite(out.gradient))
+        At = nan(d,1);
+        An = nan(d,1);
+    else
+        At = sum(abs(contribution.*s.'),1).';
+        An = abs(s.*out.gradient);
+    end
+    attribution = struct( ...
+        'total',At,'net',An,'observed',observed);
+end
+
+function value = local_empty_attribution(d,coefficient)
+%LOCAL_EMPTY_ATTRIBUTION Return one unavailable named attribution.
+
+    value = struct( ...
+        'total',nan(d,1),'net',nan(d,1), ...
+        'weighted_total',nan(d,1), ...
+        'weighted_net',nan(d,1), ...
+        'coefficient',coefficient);
+end
+
+function observed = local_observed_attribution(attribution,names)
+%LOCAL_OBSERVED_ATTRIBUTION Return a consistent named attribution.
+
+    if isfield(attribution,'observed')
+        observed = attribution.observed;
+        return
+    end
+    observed = struct();
+    if isscalar(names)
+        name = char(names(1));
+        observed.(name) = struct( ...
+            'total',attribution.total, ...
+            'net',attribution.net, ...
+            'weighted_total',attribution.total, ...
+            'weighted_net',attribution.net, ...
+            'coefficient',1);
+    end
+end
+
+function Aobs = local_package_observation_attribution( ...
+    values,names,d,Kt)
+%LOCAL_PACKAGE_OBSERVATION_ATTRIBUTION Assemble d x K named matrices.
+
+    Aobs = struct();
+    for j = 1:numel(names)
+        name = char(names(j));
+        Aobs.(name) = struct( ...
+            'total',nan(d,Kt), ...
+            'net',nan(d,Kt), ...
+            'weighted_total',nan(d,Kt), ...
+            'weighted_net',nan(d,Kt), ...
+            'coefficient',nan(1,Kt));
+    end
+    for k = 1:Kt
+        if isempty(values{k})
+            continue
+        end
+        for j = 1:numel(names)
+            name = char(names(j));
+            if ~isfield(values{k},name)
+                continue
+            end
+            item = values{k}.(name);
+            Aobs.(name).total(:,k) = item.total;
+            Aobs.(name).net(:,k) = item.net;
+            Aobs.(name).weighted_total(:,k) = ...
+                item.weighted_total;
+            Aobs.(name).weighted_net(:,k) = ...
+                item.weighted_net;
+            Aobs.(name).coefficient(k) = item.coefficient;
+        end
+    end
+end
+
+function met = local_store_joint_metrics(met,names,result)
+%LOCAL_STORE_JOINT_METRICS Flatten joint diagnostics for aggregation.
+
+    fields = local_joint_metric_fields();
+    for f = 1:numel(fields)
+        met.(fields{f}) = NaN;
+    end
+
+    tags = {'t','e'};
+    for p = 1:2
+        tag = tags{p};
+        R = result.(tag);
+        met.(['JointLtot_' tag]) = R.total;
+        for j = 1:numel(names)
+            name = char(names(j));
+            met.(['JointL' name tag]) = R.value(j);
+            met.(['JointC' name tag]) = R.contribution(j);
+            if ~isempty(R.detail{j})
+                met.([name '_NSE' tag]) = R.detail{j}.NSE;
+                met.([name '_KGE' tag]) = R.detail{j}.KGE;
+                met.([name '_KGE_r' tag]) = ...
+                    R.detail{j}.KGE_r;
+                met.([name '_KGE_alpha' tag]) = ...
+                    R.detail{j}.KGE_alpha;
+                met.([name '_KGE_beta' tag]) = ...
+                    R.detail{j}.KGE_beta;
+                met.([name '_Dfdc' tag]) = R.detail{j}.D_fdc;
+                met.([name '_Dp' tag]) = R.detail{j}.D_p;
+                met.([name '_Dlogp' tag]) = R.detail{j}.D_logp;
+                met.([name '_JKGE' tag]) = R.detail{j}.JKGE;
+                met.([name '_JKGE_M' tag]) = R.detail{j}.JKGE_M;
+                met.([name '_JKGE_V' tag]) = R.detail{j}.JKGE_V;
+                met.([name '_JKGE_C' tag]) = R.detail{j}.JKGE_C;
+            end
+        end
+    end
+end
+
+function fields = local_joint_metric_fields()
+%LOCAL_JOINT_METRIC_FIELDS Flat worker fields for joint reporting.
+
+    fields = {'JointLQt','JointLSWEt','JointLSMt','JointLtot_t', ...
+        'JointCQt','JointCSWEt','JointCSMt', ...
+        'JointLQe','JointLSWEe','JointLSMe','JointLtot_e', ...
+        'JointCQe','JointCSWEe','JointCSMe', ...
+        'Q_NSEt','Q_KGEt','Q_KGE_rt','Q_KGE_alphat', ...
+        'Q_KGE_betat','Q_Dfdct','Q_Dpt','Q_Dlogpt', ...
+        'Q_JKGEt','Q_JKGE_Mt','Q_JKGE_Vt','Q_JKGE_Ct', ...
+        'Q_NSEe','Q_KGEe','Q_KGE_re','Q_KGE_alphae', ...
+        'Q_KGE_betae','Q_Dfdce','Q_Dpe','Q_Dlogpe', ...
+        'Q_JKGEe','Q_JKGE_Me','Q_JKGE_Ve','Q_JKGE_Ce', ...
+        'SWE_NSEt','SWE_KGEt','SWE_KGE_rt','SWE_KGE_alphat', ...
+        'SWE_KGE_betat','SWE_Dfdct', ...
+        'SWE_Dpt','SWE_Dlogpt','SWE_JKGEt', ...
+        'SWE_JKGE_Mt','SWE_JKGE_Vt','SWE_JKGE_Ct', ...
+        'SWE_NSEe','SWE_KGEe','SWE_KGE_re','SWE_KGE_alphae', ...
+        'SWE_KGE_betae','SWE_Dfdce','SWE_Dpe', ...
+        'SWE_Dlogpe','SWE_JKGEe','SWE_JKGE_Me', ...
+        'SWE_JKGE_Ve','SWE_JKGE_Ce', ...
+        'SM_NSEt','SM_KGEt','SM_KGE_rt','SM_KGE_alphat', ...
+        'SM_KGE_betat','SM_Dfdct','SM_Dpt','SM_Dlogpt', ...
+        'SM_JKGEt','SM_JKGE_Mt','SM_JKGE_Vt','SM_JKGE_Ct', ...
+        'SM_NSEe','SM_KGEe','SM_KGE_re','SM_KGE_alphae', ...
+        'SM_KGE_betae','SM_Dfdce','SM_Dpe','SM_Dlogpe', ...
+        'SM_JKGEe','SM_JKGE_Me','SM_JKGE_Ve','SM_JKGE_Ce'};
+end
+
+function values = local_joint_metric_vector(met,fields)
+%LOCAL_JOINT_METRIC_VECTOR Collect flat joint fields for PARFOR.
+
+    values = nan(numel(fields),1);
+    for f = 1:numel(fields)
+        if isfield(met,fields{f})
+            values(f) = met.(fields{f});
+        end
+    end
+end
+
+function values = local_loss_scales(loss,names)
+%LOCAL_LOSS_SCALES Return fixed positive scales for named losses.
+
+    values = ones(numel(names),1);
+    if ~isfield(loss,'normalization') ...
+            || isempty(loss.normalization)
+        return
+    end
+    normalization = loss.normalization;
+    if isstruct(normalization) ...
+            && isfield(normalization,'scale')
+        values = local_loss_vector( ...
+            normalization,'scale',names,values);
+    end
+    if any(~isfinite(values) | values <= 0)
+        error('camels:InvalidLossScale', ...
+            'Every multiple-observation loss scale must be positive.');
+    end
+end
+
+function values = local_loss_vector(S,field,names,defaultValue)
+%LOCAL_LOSS_VECTOR Read a numeric or named loss setting.
+
+    values = double(defaultValue(:));
+    if ~isstruct(S) ...
+            || ~isfield(S,field) ...
+            || isempty(S.(field))
+        return
+    end
+    source = S.(field);
+    if isnumeric(source)
+        source = double(source(:));
+        if isscalar(source)
+            values(:) = source;
+        elseif numel(source) == numel(names)
+            values = source;
+        else
+            error('camels:LossSettingSize', ...
+                'loss.%s must be scalar or match loss.observed.',field);
+        end
+    elseif isstruct(source)
+        for j = 1:numel(names)
+            name = char(names(j));
+            if isfield(source,name)
+                values(j) = double(source.(name));
+            end
+        end
+    else
+        error('camels:InvalidLossSetting', ...
+            'loss.%s must be numeric or a named structure.',field);
+    end
+    if strcmp(field,'weight')
+        if any(~isfinite(values) | values < 0) ...
+                || sum(values) <= 0
+            error('camels:InvalidLossWeight', ...
+                ['Multiple-observation loss weights must be ' ...
+                 'finite and nonnegative.']);
+        end
+        values = values/sum(values);
+    elseif any(~isfinite(values) | values <= 0)
+        error('camels:InvalidLossScale', ...
+            ['Multiple-observation loss scales must be ' ...
+             'finite and positive.']);
+    end
+end
+
+function S = local_named_struct(names,values)
+%LOCAL_NAMED_STRUCT Store one scalar under each observation name.
+
+    S = struct();
+    for j = 1:numel(names)
+        S.(char(names(j))) = values(j);
+    end
+end
+
+function loss = local_prepare_loss_normalization( ...
+    loss,nTheta,mdl,dat,bas,ode,crrBackend,calc,iteration)
+%LOCAL_PREPARE_LOSS_NORMALIZATION Establish fixed observable scales.
+
+    names = local_observation_names(loss);
+    if isscalar(names) ...
+            && names == "Q"
+        return
+    end
+    if isscalar(names)
+        loss.normalization = struct( ...
+            'method','none', ...
+            'scale',local_named_struct(names,1), ...
+            'floor',1e-12, ...
+            'observed',cellstr(names));
+        return
+    end
+
+    method = "auto";
+    if isfield(loss,'normalization') ...
+            && isstruct(loss.normalization) ...
+            && isfield(loss.normalization,'method') ...
+            && ~isempty(loss.normalization.method)
+        method = lower(string(loss.normalization.method));
+    elseif isfield(loss,'normalization') ...
+            && isstruct(loss.normalization) ...
+            && isfield(loss.normalization,'scale') ...
+            && ~isempty(loss.normalization.scale)
+        method = "manual";
+    end
+    if ~isscalar(method)
+        error('camels:NormalizationMethod', ...
+            ['loss.normalization.method ' ...
+            'must be scalar text.']);
+    end
+    requestedMethod = method;
+    if isfield(loss,'normalization') ...
+            && isfield(loss.normalization,'requested_method') ...
+            && ~isempty(loss.normalization.requested_method)
+        requestedMethod = lower(string( ...
+            loss.normalization.requested_method));
+    end
+    if method == "auto"
+        method = local_auto_normalization_method(loss.fnc);
+    end
+
+    floorValue = 1e-12;
+    if isfield(loss,'normalization') ...
+            && isfield(loss.normalization,'floor') ...
+            && ~isempty(loss.normalization.floor)
+        floorValue = double(loss.normalization.floor);
+    end
+    if ~isscalar(floorValue) ...
+            || ~isfinite(floorValue) ...
+            || floorValue <= 0
+        error('camels:NormalizationFloor', ...
+            ['loss.normalization.floor ' ...
+            'must be finite and positive.']);
+    end
+
+    counts = local_observation_basin_counts(dat,names,bas.K_t);
+    if any(counts <= 0)
+        missing = names(counts <= 0);
+        error('camels:NoObservationBasins', ...
+            ['No training basins contain ' ...
+            'observations for: %s.'], ...
+            strjoin(cellstr(missing),', '));
+    end
+
+    hasScale = isfield(loss,'normalization') ...
+        && isstruct(loss.normalization) ...
+        && isfield(loss.normalization,'scale') ...
+        && ~isempty(loss.normalization.scale);
+
+    switch method
+        case {"manual","fixed"}
+            if ~hasScale
+                error('camels:MissingManualScale', ...
+                    ['Manual normalization requires ' ...
+                     'loss.normalization.scale.']);
+            end
+            scales = local_loss_vector( ...
+                loss.normalization,'scale', ...
+                names,ones(numel(names),1));
+
+        case "none"
+            scales = ones(numel(names),1);
+
+        case "initial_loss"
+            if hasScale
+                scales = local_loss_vector( ...
+                    loss.normalization,'scale',names, ...
+                    ones(numel(names),1));
+            else
+                if iteration ~= 1
+                    error('camels:MissingInitialScale', ...
+                        ['Initial-loss scales are ' ...
+                        'absent after iteration 1. ' ...
+                         'Restore the saved ' ...
+                         'loss.normalization structure.']);
+                end
+                scales = local_initial_loss_scales( ...
+                    loss,nTheta,mdl,dat,bas.K_t,ode, ...
+                    crrBackend,calc,names);
+            end
+
+        case "benchmark"
+            if double(loss.fnc) == 4 ...
+                    || double(loss.fnc) == 7
+                error('camels:BenchmarkNormalization', ...
+                    ['Constant-observation ' ...
+                    'benchmark normalization is ' ...
+                     'undefined for KGE and JKGE. ' ...
+                     'Use initial_loss or ' ...
+                     'manual normalization.']);
+            end
+            scales = local_benchmark_loss_scales( ...
+                loss,dat,bas.K_t,names);
+
+        otherwise
+            error('camels:NormalizationMethod', ...
+                ['Unknown normalization method ' ...
+                '"%s". Use auto, initial_loss, ' ...
+                 'benchmark, manual, or none.'],method);
+    end
+
+    scales = max(abs(scales),floorValue);
+    loss.normalization.method = char(method);
+    loss.normalization.requested_method = char(requestedMethod);
+    loss.normalization.scale = local_named_struct(names,scales);
+    loss.normalization.floor = floorValue;
+    loss.normalization.n_basin = local_named_struct(names,counts);
+    loss.normalization.n_total = bas.K_t;
+    loss.normalization.observed = cellstr(names);
+    if method == "initial_loss" ...
+            && ~hasScale
+        loss.normalization.iteration = iteration;
+    end
+end
+
+function method = local_auto_normalization_method(lossFnc)
+%LOCAL_AUTO_NORMALIZATION_METHOD Select normalization for a loss function.
+
+    switch double(lossFnc)
+        case {1,2,5,6}
+            method = "benchmark";
+        case {3,4,7}
+            method = "none";
+        otherwise
+            error('camels:NormalizationLoss', ...
+                'Cannot select normalization for loss function %g.', ...
+                double(lossFnc));
+    end
+end
+
+function counts = local_observation_basin_counts(dat,names,Kt)
+%LOCAL_OBSERVATION_BASIN_COUNTS Count eligible training basins by type.
+
+    counts = zeros(numel(names),1);
+    for j = 1:numel(names)
+        field = char(names(j));
+        for k = 1:Kt
+            if isfield(dat{k},'stats') ...
+                    && isfield(dat{k}.stats,field) ...
+                    && isfield(dat{k}.stats.(field),'train') ...
+                    && dat{k}.stats.(field).train.has_data
+                counts(j) = counts(j) + 1;
+            end
+        end
+    end
+end
+
+function scales = local_initial_loss_scales( ...
+    loss,nTheta,mdl,dat,Kt,ode,crrBackend,calc,names)
+%LOCAL_INITIAL_LOSS_SCALES Evaluate the unweighted initial objectives.
+
+    probeLoss = loss;
+    probeLoss.normalization = struct( ...
+        'method','none', ...
+        'scale',local_named_struct(names,ones(numel(names),1)));
+    request = crr_request(struct('q',false,'gradient',true, ...
+        'metrics',false,'attribution',false, ...
+        'obs',names,'jac',names));
+    raw = nan(numel(names),Kt);
+
+    if ismember(calc,{'par','parfeval'})
+        parfor k = 1:Kt
+            raw(:,k) = local_probe_observation_losses( ...
+                crrBackend,nTheta(:,k),mdl,dat{k}, ...
+                ode,probeLoss,request,names);
+        end
+    else
+        for k = 1:Kt
+            raw(:,k) = local_probe_observation_losses( ...
+                crrBackend,nTheta(:,k),mdl,dat{k}, ...
+                ode,probeLoss,request,names);
+        end
+    end
+
+    scales = mean(raw,2,'omitnan');
+    if any(~isfinite(scales))
+        bad = names(~isfinite(scales));
+        error('camels:InitialLossScale', ...
+            'Cannot estimate initial loss scale for: %s.', ...
+            strjoin(cellstr(bad),', '));
+    end
+end
+
+function values = local_probe_observation_losses( ...
+    crrBackend,x,mdl,dat,ode,loss,request,names)
+%LOCAL_PROBE_OBSERVATION_LOSSES Return raw named losses for one basin.
+
+    [~,out] = run_crr_local( ...
+        crrBackend,x,mdl,dat,ode,loss,request);
+    values = nan(numel(names),1);
+    if ~isfield(out,'loss')
+        return
+    end
+    for j = 1:numel(names)
+        field = char(names(j));
+        if isfield(out.loss,field)
+            values(j) = out.loss.(field);
+        end
+    end
+end
+
+function scales = local_benchmark_loss_scales(loss,dat,Kt,names)
+%LOCAL_BENCHMARK_LOSS_SCALES Use a constant-mean observation benchmark.
+
+    raw = nan(numel(names),Kt);
+    for j = 1:numel(names)
+        field = char(names(j));
+        for k = 1:Kt
+            if ~isfield(dat{k},'stats') ...
+                    || ~isfield(dat{k}.stats,field) ...
+                    || ~dat{k}.stats.(field).train.has_data
+                continue
+            end
+            y = dat{k}.obs.(field).value(:);
+            mu = dat{k}.stats.(field).train.mean;
+            sim = repmat(mu,numel(y),1);
+            J = zeros(numel(y),1);
+            raw(j,k) = observation_loss( ...
+                names(j),sim,J,dat{k},loss);
+        end
+    end
+    scales = mean(raw,2,'omitnan');
+    if any(~isfinite(scales) | scales <= 0)
+        bad = names(~isfinite(scales) | scales <= 0);
+        error('camels:BenchmarkLossScale', ...
+            'Cannot estimate benchmark loss scale for: %s.', ...
+            strjoin(cellstr(bad),', '));
+    end
 end

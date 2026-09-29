@@ -14,7 +14,8 @@ function dat = read_discharge_data(dirQ,mdl,dat,bas,split,aux,schema) %#ok<INUSD
 %   schema     Generic discharge schema containing variables.Q
 %
 % OUTPUT:
-%   dat        Input data augmented with y_n, bad, and discharge filename
+%   dat        Input data augmented with obs.Q.value, obs.Q.bad, and
+%              discharge metadata.
 %
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % © Written by Jasper A. Vrugt, Aug. 2026                                 %
@@ -31,6 +32,10 @@ function dat = read_discharge_data(dirQ,mdl,dat,bas,split,aux,schema) %#ok<INUSD
     end
     schema = resolve_hydro_schema(schema,split,struct());
     schema = validate_hydro_schema(schema,'Q');
+    if isfield(bas,'data_actions') ...
+            && ~isempty(bas.data_actions)
+        schema.data_actions = bas.data_actions;
+    end
     if isfield(schema,'reuse_existing_q') ...
             && schema.reuse_existing_q ...
             && local_has_existing_q(dat)
@@ -50,10 +55,13 @@ function tf = local_has_existing_q(dat)
         && ~isempty(dat);
     for k = 1:numel(dat)
         entry = dat{k};
-        if ~isstruct(entry) ...
-                || ~isfield(entry,'y_n') ...
-                || ~isfield(entry,'bad') ...
-                || numel(entry.y_n) ~= numel(entry.bad)
+        hasCanonical = isstruct(entry) ...
+            && isfield(entry,'obs') && isstruct(entry.obs) ...
+            && isfield(entry.obs,'Q') && isstruct(entry.obs.Q) ...
+            && isfield(entry.obs.Q,'value') ...
+            && isfield(entry.obs.Q,'bad') ...
+            && numel(entry.obs.Q.value) == numel(entry.obs.Q.bad);
+        if ~hasCanonical
             tf = false;
             return
         end

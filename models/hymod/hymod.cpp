@@ -547,6 +547,9 @@ bool run_into(int ns,
         if (needJ && (!out.J || out.nj != (std::size_t)d)) {
             return true;
         }
+        if (out.Jswe && out.nj != (std::size_t)d) {
+            return true;
+        }
     }
     const double* P = forcing.P;
     const double* Ep = forcing.Ep;
@@ -572,6 +575,12 @@ bool run_into(int ns,
         std::fill(out.q, out.q + out.nq, 0.0);
         if (needJ) {
             std::fill(out.J, out.J + out.nq * out.nj, 0.0);
+        }
+        if (out.swe) {
+            std::fill(out.swe, out.swe + out.nq, 0.0);
+        }
+        if (out.Jswe) {
+            std::fill(out.Jswe, out.Jswe + out.nq * out.nj, 0.0);
         }
     }
     int last_stored_row = 0;
@@ -671,13 +680,25 @@ bool run_into(int ns,
             for (int j = 0; j < nvar; ++j) {
                 out.Z[(std::size_t)j] = zcur[j];
             }
-            if (ss >= ipr && out.q) {
-                out.q[k_out] = zcur[m - 1] - prev[m - 1];
+            if (ss >= ipr && (out.q || out.J || out.swe || out.Jswe)) {
+                if (out.q) {
+                    out.q[k_out] = zcur[m - 1] - prev[m - 1];
+                }
                 if (needJ && out.J) {
                     for (int j = 0; j < d; ++j) {
                         const int idx = (j + 2) * m - 1;
                         out.J[(std::size_t)k_out + (std::size_t)n_q * j] =
                             zcur[idx] - prev[idx];
+                    }
+                }
+                if (out.swe) {
+                    out.swe[k_out] = zcur[0];
+                }
+                if (out.Jswe) {
+                    for (int j = 0; j < d; ++j) {
+                        const int idx = (j + 1) * m;
+                        out.Jswe[(std::size_t)k_out + (std::size_t)n_q * j] =
+                            zcur[idx];
                     }
                 }
                 ++k_out;

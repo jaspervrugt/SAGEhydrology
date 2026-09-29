@@ -10,6 +10,7 @@
 
 #include "mex.h"
 #include "hbv.hpp"
+#include "../standalone_result.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -80,11 +81,12 @@ InputVector vector_view(const mxArray* a, const char* name)
 
 void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[])
 {
-    if (nrhs != 4) {
+    const bool structured = nrhs == 5;
+    if (nrhs != 4 && nrhs != 5) {
         mexErrMsgIdAndTxt("crr_hbv:nrhs", "Expected 4 inputs: t_last, z0, data, options.");
     }
 
-    if (nlhs > 4) {
+    if ((structured && nlhs != 1) || (!structured && nlhs > 4)) {
         mexErrMsgIdAndTxt("crr_hbv:nlhs", "At most four outputs are supported.");
     }
 
@@ -145,6 +147,7 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[])
     if (memA && !mxIsEmpty(memA)) {
         mem = static_cast<int>(std::llround(mxGetScalar(memA)));
     }
+    std::vector<std::string> on,jn,sn;bool wq=0,wj=0,ws=0,wjs=0,wm=0,wjm=0;if(structured){on=sage_standalone::names(prhs[4],"obs");jn=sage_standalone::names(prhs[4],"jac");sn=sage_standalone::names(prhs[4],"states");wq=sage_standalone::has(on,"Q")||sage_standalone::flag(prhs[4],"q");wj=sage_standalone::has(jn,"Q")||sage_standalone::flag(prhs[4],"jacobian");ws=sage_standalone::has(on,"SWE");wjs=sage_standalone::has(jn,"SWE");wm=sage_standalone::has(on,"SM");wjm=sage_standalone::has(jn,"SM");mem=sn.empty()?0:1;}
 
     int ipr = 1;
     const mxArray* iprA = field(data, "ipr", false);
@@ -169,11 +172,14 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[])
     const mwSize nq = (mem == 0 && ipr <= ns) ? static_cast<mwSize>(ns - ipr + 1) : 0;
 
     // Allocate MATLAB outputs once and let the core write directly into them.
-    plhs[0] = mxCreateDoubleMatrix(zrows, nvar, mxREAL);
-    double* Z = mxGetPr(plhs[0]);
+    mxArray* Zmx = mxCreateDoubleMatrix(zrows, nvar, mxREAL);
+    if (!structured) plhs[0] = Zmx;
+    double* Z = mxGetPr(Zmx);
 
     double* q = nullptr;
     double* J = nullptr;
+    double *swe=nullptr,*Jswe=nullptr,*sm=nullptr,*Jsm=nullptr;
+    std::vector<double> qb,Jb,sb,Jsb,mb,Jmb;
 
     if (nlhs >= 2) {
         if (mem == 0 && nq > 0) {
@@ -192,6 +198,7 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[])
             plhs[2] = mxCreateDoubleMatrix(0, 0, mxREAL);
         }
     }
+    if(structured&&!mem){if(wq){qb.assign(nq,0);q=qb.data();}if(wj){Jb.assign(nq*d,0);J=Jb.data();}if(ws){sb.assign(nq,0);swe=sb.data();}if(wjs){Jsb.assign(nq*d,0);Jswe=Jsb.data();}if(wm){mb.assign(nq,0);sm=mb.data();}if(wjm){Jmb.assign(nq*d,0);Jsm=Jmb.data();}}
 
     sage_hbv::Forcing forcing;
     forcing.P = P.ptr;
@@ -207,11 +214,17 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[])
     out.zcols = nvar;
     out.nq = nq;
     out.nj = (J != nullptr) ? d : 0;
+    if(structured) out.nj=d;
+    out.swe=swe;out.Jswe=Jswe;out.sm=sm;out.Jsm=Jsm;
 
     const bool fail = sage_hbv::run_into(
-        ns, z0.ptr, z0.n, forcing, p, opt, mem != 0, ipr, J != nullptr, out);
+        ns,z0.ptr,z0.n,forcing,p,opt,mem!=0,ipr,
+        structured?(wj||wjs||wjm):J!=nullptr,out);
 
-    if (nlhs >= 4) {
+    if (structured) {
+        if(mem)plhs[0]=sage_standalone::result(prhs[4],Z,zrows,ns,ipr,5,(int)d,fail,{1});else{std::vector<sage_standalone::OutputChannel> c{{"Q",q,J},{"SWE",swe,Jswe},{"SM",sm,Jsm}};plhs[0]=sage_standalone::result(prhs[4],c,nq,(int)d,Z,zrows,ns,ipr,5,fail);}
+        mxDestroyArray(Zmx);
+    } else if (nlhs >= 4) {
         plhs[3] = mxCreateLogicalScalar(fail);
     }
 }

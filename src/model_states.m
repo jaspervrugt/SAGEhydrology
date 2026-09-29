@@ -1,9 +1,38 @@
 function states = model_states(mdl,Z,requested,nq)
-%MODEL_STATES Package named physical model states on the discharge grid.
-% The final augmented ODE state is accumulated discharge and is excluded.
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%MODEL_STATES Return named physical states on the discharge grid.
+%
+%  Extract physical states from augmented solver history, excluding
+%  cumulative-discharge bookkeeping states.
+%
+% SYNOPSIS:
+%   states = model_states(mdl,Z,requested,nq)
+%
+% INPUT ARGUMENTS:
+%   mdl             model and output-time definition
+%    .model          model identifier
+%    .idx            indices of the discharge output grid
+%    .y0             initial states for fixed-state models
+%    .state_name     optional names for private or user models
+%    .state_units    optional units for private or user models
+%   Z               augmented state and sensitivity history
+%   requested       "all" or a string/cell list of state names
+%   nq              required number of output samples
+%
+% OUTPUT ARGUMENTS:
+%   states          requested physical-state trajectories and metadata
+%    .values         nq-by-n matrix of state trajectories
+%    .names          n-by-1 state-name strings
+%    .units          n-by-1 state-unit strings
+%
+% NOTES:
+%   Rows of states.values are sampled using mdl.idx and must match the
+%   discharge trajectory length nq.
+%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-    if ismember(mdl.model,[8 21])
-        % GR4J-B and a user model can have a parameter-dependent number
+    if ismember(mdl.model,[11 99])
+        % A user model can have a parameter-dependent number
         % of routing-memory states known only after solver preparation.
         d = numel(mdl.th_min);
         m = size(Z,2)/(d+1);
@@ -48,8 +77,10 @@ function states = model_states(mdl,Z,requested,nq)
 end
 
 function [names,units] = local_catalog(mdl,nstate)
+%LOCAL_CATALOG Return state names and units for the selected model.
+
     switch mdl.model
-        case {1,31}
+        case 1
             names = ["snow_water_equivalent", ...
                 "soil_storage", ...
                 "slow_reservoir", ...
@@ -98,24 +129,27 @@ function [names,units] = local_catalog(mdl,nstate)
                 "soil_storage", ...
                 "groundwater_storage", ...
                 compose("routing_storage_%d",1:n)];
-        case 8
-            if isfield(mdl,'state_names')
-                names = string(mdl.state_names(:))';
+        case 11
+            if isfield(mdl,'state_name')
+                names = string(mdl.state_name(1:nstate));
             else
                 names = compose("state_%d",1:nstate);
             end
-        case 21
-            n = nstate-3;
-            names = ["snow_water_equivalent", ...
-                "production_store", ...
-                "routing_store", ...
-                compose("routing_memory_%d",1:n)];
+        case 99
+            if isfield(mdl,'state_name')
+                names = string(mdl.state_name(:))';
+            else
+                names = compose("state_%d",1:nstate);
+            end
         otherwise
             error('model_states:UnknownModel', ...
                 'Unknown model code %g.',mdl.model);
     end
     names = string(names(:)); 
-    units = repmat("mm",size(names));
+    units = repmat("mm",nstate,1);
+    if mdl.model == 11 && isfield(mdl,'state_units')
+        units = string(mdl.state_units(1:nstate));
+    end
     expected = nstate;
     if numel(names) ~= expected
         error('model_states:CatalogMismatch', ...

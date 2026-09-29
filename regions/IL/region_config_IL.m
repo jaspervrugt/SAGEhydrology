@@ -17,9 +17,15 @@ function R = region_config_IL()
     X = struct();
     X.label = 'Daily';
     X.dt = 1;
-    X.basins.universe = 94;
-    X.basins.training = 74;
+    % Universal inventory: all 95 catchments distributed by the Israel
+    % Caravan extension. Hydrologically inconsistent basins (notably gauge
+    % 30131, whose effective groundwater area exceeds its mapped surface
+    % catchment) remain visible and are handled by the quality analysis.
+    X.basins.universe = 95;
+    X.basins.training = 75;
     X.basins.evaluation = 20;
+    % Curated basin exclusions are maintained in the common hydrologic
+    % data-action registry and remain visible in the quality audit.
     X.period.spinup_days = 365;
     X.period.manual.train_start = '01/10/2004';
     X.period.manual.train_end = '30/09/2019';
@@ -27,7 +33,7 @@ function R = region_config_IL()
     X.period.manual.eval_end = '30/09/2004';
     X.period.common_start = '01/10/1989';
     X.period.common_end = '30/09/2019';
-    X.paths.run_root = fullfile('daily');
+    X.paths.run_root = '';
     X.paths.meteo = fullfile('daily','timeseries');
     X.paths.discharge = fullfile('daily','timeseries');
     % Meteorological/PET controls shown by SAGE-GUI.
@@ -114,7 +120,7 @@ function S = local_meteo_schema()
     S.variables.Q = local_variable('streamflow','m3/s','mm/day');
     S.variables.Q.area_normalize = true;
     S.variables.Q.valid_min = 0;
-    S.aux.tables.other.file = '../attributes_other_il.csv';
+    S.aux.tables.other.file = '../../attributes_other_il.csv';
     S.aux.tables.other.key = 'gauge_id';
     S.aux.tables.other.strip_prefix = 'IL_';
     S.aux.tables.other.lat = 'gauge_lat';

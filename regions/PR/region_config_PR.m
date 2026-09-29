@@ -1,6 +1,6 @@
 function R=region_config_PR()
 %REGION_CONFIG_PR Defaults for Puerto Rico GRDC-Caravan.
-    R=region_config_GRDC('PR','Puerto Rico',24,22,18,4, ...
+    R=region_config_GRDC('PR','Puerto Rico',24,24,20,4, ...
         '01/10/1980','30/09/2000','01/10/2000','30/09/2020');
 
     % Declarative generic-reader schemas owned by this region module.

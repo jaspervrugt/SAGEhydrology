@@ -16,9 +16,9 @@ function R = region_config_ZA()
     X.dt = 1;
     % Of 434 installed stations, 352 have at least 5% observed discharge
     % in both default twenty-water-year periods.
-    X.basins.universe = 352;
-    X.basins.training = 293;
-    X.basins.evaluation = 59;
+    X.basins.universe = 434;
+    X.basins.training = 361;
+    X.basins.evaluation = 73;
     X.period.spinup_days = 365;
     X.period.manual.train_start = '01/10/1990';
     X.period.manual.train_end = '30/09/2010';

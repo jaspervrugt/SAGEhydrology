@@ -5,7 +5,7 @@
  *
  * Supported built-in models:
  *   1 HYMOD, 2 HMODEL, 3 SAC-SMA, 4 Xinanjiang,
- *   5 GR4J-A, 6 HBV, 7 CFE-NWM, 21 GR4J-B.
+ *   5 GR4J-A, 6 HBV, 7 CFE-NWM.
  *
  * Native path:
  *   model preparation -> direct extracted C++ core -> q/J ->
@@ -13,12 +13,14 @@
  *
  * V3 native objectives: 1 SAR, 2 RSS/GLS(identity), 3 NSE,
  *                       4 KGE, 5 Huber, 6 FDC, 7 JKGE.
- * Native requested outputs: q, gradient, jacobian, metrics, attribution, states.
+ * Native requested outputs: q, gradient, jacobian, metrics, attribution, states,
+ *                           and named obs/Jacobians.
  *
  * The MATLAB reference crr_model.m remains untouched.
  */
 
 #include "mex.h"
+#include <cstring>
 #include "matrix.h"
 
 #include <algorithm>
@@ -31,11 +33,12 @@
 #include <vector>
 
 #include "hymod/hymod.hpp"
+
 #include "hmodel/hmodel.hpp"
 #include "sacsma/sacsma.hpp"
 #include "Xinanjiang/xinanjiang.hpp"
 #include "gr4jA/gr4jA.hpp"
-#include "gr4jB/gr4jB.hpp"
+
 #include "hbv/hbv.hpp"
 #include "cfe_nwm/cfe_nwm.hpp"
 
@@ -413,7 +416,7 @@ void gr4j_uh(double x4,
 typedef void (*Entry)(int, mxArray**, int, const mxArray**);
 
 struct Sim {
-    std::vector<double> q, J, Z;
+    std::vector<double> q, J, Z, swe, Jswe, sm, Jsm;
     mwSize nq = 0, nj = 0, zrows = 0, zcols = 0;
     int m = 0, dode = 0;
     bool fail = false;
@@ -428,8 +431,9 @@ struct InputVectorView {
 InputVectorView vector_view(const mxArray* a, const char* name)
 {
     InputVectorView v;
-    if (!a || mxIsComplex(a)) {
-        mexErrMsgIdAndTxt("crr_model_mex:Vector", "'%s' must be real.", name);
+    if (!a || mxIsComplex(a) || mxIsSparse(a) ||
+        (mxGetM(a) != 1 && mxGetN(a) != 1)) {
+        mexErrMsgIdAndTxt("crr_model_mex:Vector", "'%s' must be a real, dense vector.", name);
     }
     v.n = static_cast<std::size_t>(mxGetNumberOfElements(a));
     if (mxIsDouble(a)) {
@@ -485,7 +489,9 @@ make_z0(const mxArray* mdl, int m, int dode, bool replicateFirst = false)
     return z0;
 }
 
-void allocate_core_outputs(Sim& R, int ns, int ipr, bool needJ, bool needStates)
+void allocate_core_outputs(Sim& R, int ns, int ipr, bool needJ, bool needStates,
+                           bool needSwe = false, bool needJswe = false,
+                           bool needSm = false, bool needJsm = false)
 {
     R.zrows = needStates ? static_cast<mwSize>(ns + 1) : 1;
     R.zcols = static_cast<mwSize>(R.m * (R.dode + 1));
@@ -496,9 +502,20 @@ void allocate_core_outputs(Sim& R, int ns, int ipr, bool needJ, bool needStates)
     if (needJ) {
         R.J.assign(static_cast<std::size_t>(R.nq) * R.dode, 0.0);
     }
+    if (needSwe) {
+        R.swe.assign(static_cast<std::size_t>(R.nq), 0.0);
+    }
+    if (needJswe) {
+        R.Jswe.assign(static_cast<std::size_t>(R.nq) * R.dode, 0.0);
+    }
+    if (needSm) R.sm.assign(static_cast<std::size_t>(R.nq),0.0);
+    if (needJsm) R.Jsm.assign(static_cast<std::size_t>(R.nq)*R.dode,0.0);
 }
 
-void reconstruct_states_qj(Sim& R, const mxArray* mdl, bool needJ)
+void reconstruct_states_qj(Sim& R, const mxArray* mdl, bool needJ,
+                           bool needSwe = false, bool needJswe = false,
+                           int model = 0, bool needSm = false,
+                           bool needJsm = false)
 {
     auto midx = vec(fld(mdl, "idx"), "mdl.idx");
     const long long i0 = static_cast<long long>(std::llround(midx[0]));
@@ -535,6 +552,65 @@ void reconstruct_states_qj(Sim& R, const mxArray* mdl, bool needJ)
         }
         R.nj = static_cast<mwSize>(R.dode);
     }
+    if (needSwe) {
+        R.swe.assign(static_cast<std::size_t>(R.nq), 0.0);
+        const std::vector<std::size_t> sweCols =
+            (model == 11) ? std::vector<std::size_t>{0, 2}
+                          : std::vector<std::size_t>{0};
+        for (mwSize i = 0; i < R.nq; ++i) {
+            const std::size_t rb = static_cast<std::size_t>(i0) + i;
+            for (const auto col : sweCols) {
+                R.swe[i] += R.Z[rb + static_cast<std::size_t>(R.zrows) * col];
+            }
+        }
+    }
+    if (needJswe) {
+        R.Jswe.assign(static_cast<std::size_t>(R.nq) * R.dode, 0.0);
+        const std::vector<std::size_t> sweCols =
+            (model == 11) ? std::vector<std::size_t>{0, 2}
+                          : std::vector<std::size_t>{0};
+        for (int j = 0; j < R.dode; ++j) {
+            for (mwSize i = 0; i < R.nq; ++i) {
+                const std::size_t rb = static_cast<std::size_t>(i0) + i;
+                for (const auto stateCol : sweCols) {
+                    const std::size_t scol =
+                        (static_cast<std::size_t>(j) + 1) * R.m + stateCol;
+                    R.Jswe[i + static_cast<std::size_t>(R.nq) * j] +=
+                        R.Z[rb + static_cast<std::size_t>(R.zrows) * scol];
+                }
+            }
+        }
+    }
+    if (needSm || needJsm) {
+        std::vector<std::size_t> cols;
+        if (model == 2) cols = {2};
+        else if (model == 3) cols = {1,2,3,4,5};
+        else if (model == 4) cols = {1,2};
+        else if (model == 5 || model == 6 || model == 7) cols = {1};
+        else mexErrMsgIdAndTxt("crr_model_mex:SM",
+            "SM is not available for model %d.",model);
+        if (needSm) {
+            R.sm.assign(static_cast<std::size_t>(R.nq),0.0);
+            for (mwSize i=0;i<R.nq;++i) {
+                const std::size_t rb=static_cast<std::size_t>(i0)+i;
+                for (const auto col : cols)
+                    R.sm[i]+=R.Z[rb+static_cast<std::size_t>(R.zrows)*col];
+            }
+        }
+        if (needJsm) {
+            R.Jsm.assign(static_cast<std::size_t>(R.nq)*R.dode,0.0);
+            for (int j=0;j<R.dode;++j)
+                for (mwSize i=0;i<R.nq;++i) {
+                    const std::size_t rb=static_cast<std::size_t>(i0)+i;
+                    for (const auto col : cols) {
+                        const std::size_t scol=
+                            (static_cast<std::size_t>(j)+1)*R.m+col;
+                        R.Jsm[i+static_cast<std::size_t>(R.nq)*j]+=
+                            R.Z[rb+static_cast<std::size_t>(R.zrows)*scol];
+                    }
+                }
+        }
+    }
 }
 
 void scale_jacobian(Sim& R, const std::vector<double>& Jth, bool needJ)
@@ -549,6 +625,12 @@ void scale_jacobian(Sim& R, const std::vector<double>& Jth, bool needJ)
         for (mwSize i = 0; i < R.nq; ++i) {
             R.J[i + static_cast<std::size_t>(R.nq) * j] *= Jth[j];
         }
+        for (mwSize i = 0; i < R.nq && !R.Jswe.empty(); ++i) {
+            R.Jswe[i + static_cast<std::size_t>(R.nq) * j] *= Jth[j];
+        }
+        for (mwSize i = 0; i < R.nq && !R.Jsm.empty(); ++i) {
+            R.Jsm[i + static_cast<std::size_t>(R.nq) * j] *= Jth[j];
+        }
     }
 }
 
@@ -559,7 +641,11 @@ Sim run_builtin(int model,
                 const mxArray* meteo,
                 const mxArray* ode,
                 bool needJ,
-                bool needStates)
+                bool needStates,
+                bool needSwe,
+                bool needJswe,
+                bool needSm,
+                bool needJsm)
 {
     auto midx = vec(fld(mdl, "idx"), "mdl.idx");
     if (midx.size() < 2) {
@@ -582,7 +668,7 @@ Sim run_builtin(int model,
         R.m = 7;
         R.dode = 7;
         auto z0 = make_z0(mdl, R.m, R.dode);
-        allocate_core_outputs(R, ns, ipr, needJ, needStates);
+        allocate_core_outputs(R,ns,ipr,needJ,needStates,needSwe,needJswe,needSm,needJsm);
         sage_hymod::Params p{};
         p.S_umax = th[0];
         p.beta = th[1];
@@ -599,6 +685,8 @@ Sim run_builtin(int model,
         sage_hymod::OutputView O{R.Z.data(),
                                  R.q.empty() ? nullptr : R.q.data(),
                                  R.J.empty() ? nullptr : R.J.data(),
+                                 R.swe.empty() ? nullptr : R.swe.data(),
+                                 R.Jswe.empty() ? nullptr : R.Jswe.data(),
                                  R.zrows,
                                  R.zcols,
                                  R.nq,
@@ -612,7 +700,7 @@ Sim run_builtin(int model,
         R.m = 6;
         R.dode = 9;
         auto z0 = make_z0(mdl, R.m, R.dode);
-        allocate_core_outputs(R, ns, ipr, needJ, needStates);
+        allocate_core_outputs(R,ns,ipr,needJ,needStates,needSwe,needJswe,needSm,needJsm);
         sage_hmodel::Params p{};
         p.I_max = th[0];
         p.Su_max = th[1];
@@ -636,6 +724,7 @@ Sim run_builtin(int model,
                                   R.zcols,
                                   R.nq,
                                   R.nj};
+        O.swe=R.swe.empty()?nullptr:R.swe.data();O.Jswe=R.Jswe.empty()?nullptr:R.Jswe.data();O.sm=R.sm.empty()?nullptr:R.sm.data();O.Jsm=R.Jsm.empty()?nullptr:R.Jsm.data();
         R.fail = sage_hmodel::run_into(
             ns, z0.data(), z0.size(), F, p, opt, needStates, ipr, needJ, O);
     } else if (model == 3) {
@@ -645,7 +734,7 @@ Sim run_builtin(int model,
         R.m = 10;
         R.dode = 15;
         auto z0 = make_z0(mdl, R.m, R.dode);
-        allocate_core_outputs(R, ns, ipr, needJ, needStates);
+        allocate_core_outputs(R,ns,ipr,needJ,needStates,needSwe,needJswe,needSm,needJsm);
         sage_sacsma::Params p{};
         p.uzfwm = th[0];
         p.uztwm = th[1];
@@ -676,6 +765,7 @@ Sim run_builtin(int model,
                                   R.zcols,
                                   R.nq,
                                   R.nj};
+        O.swe=R.swe.empty()?nullptr:R.swe.data();O.Jswe=R.Jswe.empty()?nullptr:R.Jswe.data();O.sm=R.sm.empty()?nullptr:R.sm.data();O.Jsm=R.Jsm.empty()?nullptr:R.Jsm.data();
         R.fail = sage_sacsma::run_into(
             ns, z0.data(), z0.size(), F, p, opt, needStates, ipr, needJ, O);
     } else if (model == 4) {
@@ -685,7 +775,7 @@ Sim run_builtin(int model,
         R.m = 9;
         R.dode = 16;
         auto z0 = make_z0(mdl, R.m, R.dode);
-        allocate_core_outputs(R, ns, ipr, needJ, needStates);
+        allocate_core_outputs(R,ns,ipr,needJ,needStates,needSwe,needJswe,needSm,needJsm);
         double fwm = th[4], flm = th[5], Stot = th[7], W = fwm * Stot, S = (1 - fwm) * Stot;
         sage_xinanjiang::Params p{};
         p.f_p = th[0];
@@ -720,7 +810,8 @@ Sim run_builtin(int model,
                                       R.zrows,
                                       R.zcols,
                                       R.nq,
-                                      R.nj};
+                                  R.nj};
+        O.swe=R.swe.empty()?nullptr:R.swe.data();O.Jswe=R.Jswe.empty()?nullptr:R.Jswe.data();O.sm=R.sm.empty()?nullptr:R.sm.data();O.Jsm=R.Jsm.empty()?nullptr:R.Jsm.data();
         R.fail = sage_xinanjiang::run_into(
             ns, z0.data(), z0.size(), F, p, opt, needStates, ipr, needJ, O);
     } else if (model == 5) {
@@ -732,7 +823,7 @@ Sim run_builtin(int model,
         R.m = n1 + n2 + 4;
         R.dode = 8;
         auto z0 = make_z0(mdl, R.m, R.dode);
-        allocate_core_outputs(R, ns, ipr, needJ, needStates);
+        allocate_core_outputs(R,ns,ipr,needJ,needStates,needSwe,needJswe,needSm,needJsm);
         sage_gr4ja::Params p{};
         p.x1 = th[0];
         p.x2 = th[1];
@@ -760,64 +851,10 @@ Sim run_builtin(int model,
                                  R.zrows,
                                  R.zcols,
                                  R.nq,
-                                 R.nj};
+                                  R.nj};
+        O.swe=R.swe.empty()?nullptr:R.swe.data();O.Jswe=R.Jswe.empty()?nullptr:R.Jswe.data();O.sm=R.sm.empty()?nullptr:R.sm.data();O.Jsm=R.Jsm.empty()?nullptr:R.Jsm.data();
         R.fail = sage_gr4ja::run_into(
             ns, z0.data(), z0.size(), F, p, opt, needStates, ipr, needJ, O);
-    } else if (model == 21) {
-        if (th.size() != 8) {
-            mexErrMsgIdAndTxt("crr_model_mex:Pars", "GR4J-B needs 8 parameters.");
-        }
-        const double eta = 2.5, mts = 1.0, x4 = th[3], pexp = eta + 1.0;
-        const int L = std::max(1, static_cast<int>(std::ceil(2.0 * x4 / mts)));
-        std::vector<double> U(L), dU(L);
-        auto cif = [=](double t) {
-            if (t <= 0.0) return 0.0;
-            if (t < x4) return std::pow(t / x4, pexp);
-            if (t < 2.0 * x4) return 1.0 - std::pow(2.0 - t / x4, pexp);
-            return 1.0;
-        };
-        auto dcif = [=](double t) {
-            if (t > 0.0 && t < x4)
-                return -(pexp / x4) * std::pow(t / x4, pexp);
-            if (t >= x4 && t < 2.0 * x4)
-                return -pexp * std::pow(2.0 - t / x4, pexp - 1.0) * t / (x4 * x4);
-            return 0.0;
-        };
-        double maxRaw = 0.0;
-        for (int k = 0; k < L; ++k) {
-            U[k] = cif((k + 1) * mts) - cif(k * mts);
-            dU[k] = dcif((k + 1) * mts) - dcif(k * mts);
-            maxRaw = std::max(maxRaw, std::abs(U[k]));
-        }
-        const double epsU = 1e-12 + 1e-6 * std::max(1.0, maxRaw);
-        double sumU = 0.0, sumDU = 0.0;
-        for (int k = 0; k < L; ++k) {
-            const double raw = U[k], den = std::sqrt(raw * raw + epsU * epsU);
-            U[k] = 0.5 * (raw + den);
-            dU[k] *= 0.5 * (1.0 + raw / den);
-            sumU += U[k]; sumDU += dU[k];
-        }
-        const double safe = std::max(sumU, 1e-30);
-        for (int k = 0; k < L; ++k) {
-            dU[k] = (dU[k] * safe - U[k] * sumDU) / (safe * safe);
-            U[k] /= safe;
-        }
-        R.m = 4 + 2 * L;
-        R.dode = 8;
-        auto z0 = make_z0(mdl, R.m, R.dode);
-        allocate_core_outputs(R, ns, ipr, needJ, needStates);
-        sage_gr4jb::Params p{};
-        p.x1=th[0]; p.x2=th[1]; p.x3=th[2]; p.x4=th[3]; p.x5=th[4];
-        p.f_p=th[5]; p.T_tr=th[6]; p.f_dd=th[7]; p.eta=eta; p.tau=eta;
-        p.kappa=4.0/9.0; p.bg=3.5; p.bR=5.0; p.mts=mts; p.T_sm=1.0;
-        p.eps_m=1e-6; p.eps_s=1e-12; p.rho=.01; p.L=L;
-        p.U=U.data(); p.dUdx4=dU.data();
-        auto opt = make_core_options<sage_gr4jb::Options>(ode);
-        sage_gr4jb::Forcing F{P.ptr, Ep.ptr, T.ptr, nf};
-        sage_gr4jb::OutputView O{R.Z.data(), R.q.empty()?nullptr:R.q.data(),
-            R.J.empty()?nullptr:R.J.data(), R.zrows, R.zcols, R.nq, R.nj};
-        R.fail = sage_gr4jb::run_into(ns,z0.data(),z0.size(),F,p,opt,
-            needStates,ipr,needJ,O);
     } else if (model == 6) {
         if (!(th.size() == 12 || th.size() == 13)) {
             mexErrMsgIdAndTxt("crr_model_mex:Pars", "HBV needs 12/13 parameters.");
@@ -825,7 +862,7 @@ Sim run_builtin(int model,
         R.m = 5;
         R.dode = 12;
         auto z0 = make_z0(mdl, R.m, R.dode);
-        allocate_core_outputs(R, ns, ipr, needJ, needStates);
+        allocate_core_outputs(R,ns,ipr,needJ,needStates,needSwe,needJswe,needSm,needJsm);
         sage_hbv::Params p{};
         p.f_c = th[0];
         p.beta = th[1];
@@ -850,7 +887,8 @@ Sim run_builtin(int model,
                                R.zrows,
                                R.zcols,
                                R.nq,
-                               R.nj};
+                                  R.nj};
+        O.swe=R.swe.empty()?nullptr:R.swe.data();O.Jswe=R.Jswe.empty()?nullptr:R.Jswe.data();O.sm=R.sm.empty()?nullptr:R.sm.data();O.Jsm=R.Jsm.empty()?nullptr:R.Jsm.data();
         R.fail = sage_hbv::run_into(
             ns, z0.data(), z0.size(), F, p, opt, needStates, ipr, needJ, O);
     } else if (model == 7) {
@@ -862,7 +900,7 @@ Sim run_builtin(int model,
         R.m = 3 + L + K + 1;
         R.dode = 15;
         auto z0 = make_z0(mdl, R.m, R.dode);
-        allocate_core_outputs(R, ns, ipr, needJ, needStates);
+        allocate_core_outputs(R,ns,ipr,needJ,needStates,needSwe,needJswe,needSm,needJsm);
         double smax = th[0], sfc = th[1] * smax, swp = th[2] * smax;
         sage_cfe_nwm::Params p{};
         p.s_max = smax;
@@ -896,7 +934,8 @@ Sim run_builtin(int model,
                                    R.zrows,
                                    R.zcols,
                                    R.nq,
-                                   R.nj};
+                                  R.nj};
+        O.swe=R.swe.empty()?nullptr:R.swe.data();O.Jswe=R.Jswe.empty()?nullptr:R.Jswe.data();O.sm=R.sm.empty()?nullptr:R.sm.data();O.Jsm=R.Jsm.empty()?nullptr:R.Jsm.data();
         R.fail = sage_cfe_nwm::run_into(
             ns, z0.data(), z0.size(), F, p, opt, needStates, ipr, needJ, O);
     } else {
@@ -904,7 +943,8 @@ Sim run_builtin(int model,
     }
 
     if (needStates) {
-        reconstruct_states_qj(R, mdl, needJ);
+        reconstruct_states_qj(
+            R,mdl,needJ,needSwe,needJswe,model,needSm,needJsm);
     }
 
     /*
@@ -953,6 +993,56 @@ Sim run_builtin(int model,
 
             R.J.swap(Jr);
             R.nj = 13;
+            if (!R.Jswe.empty()) {
+                std::vector<double> Jsr(static_cast<std::size_t>(R.nq) * 13, 0.0);
+                for (int j = 0; j < 12; ++j) {
+                    std::copy_n(R.Jswe.begin() + static_cast<std::size_t>(R.nq) * j,
+                                R.nq,
+                                Jsr.begin() + static_cast<std::size_t>(R.nq) * j);
+                }
+                R.Jswe.swap(Jsr);
+            }
+            if (!R.Jsm.empty()) {
+                std::vector<double> Jmr(
+                    static_cast<std::size_t>(R.nq)*13,0.0);
+                for (int j=0;j<12;++j)
+                    std::copy_n(
+                        R.Jsm.begin()+static_cast<std::size_t>(R.nq)*j,
+                        R.nq,Jmr.begin()+static_cast<std::size_t>(R.nq)*j);
+                R.Jsm.swap(Jmr);
+            }
+        }
+    }
+
+    if (!needStates) {
+        const mwSize wanted = static_cast<mwSize>(std::llround(midx[1] - midx[0]));
+        if (wanted > R.nq) {
+            mexErrMsgIdAndTxt("crr_model_mex:Idx", "mdl.idx exceeds simulated output.");
+        }
+        if (wanted < R.nq) {
+            R.q.resize(wanted);
+            if (!R.swe.empty()) {
+                R.swe.resize(wanted);
+            }
+            if (needJ) {
+                std::vector<double> trimmed(static_cast<std::size_t>(wanted) * R.nj);
+                for (mwSize j = 0; j < R.nj; ++j) {
+                    std::copy_n(R.J.begin() + static_cast<std::size_t>(R.nq) * j,
+                                wanted,
+                                trimmed.begin() + static_cast<std::size_t>(wanted) * j);
+                }
+                R.J.swap(trimmed);
+            }
+            if (!R.Jswe.empty()) {
+                std::vector<double> trimmed(static_cast<std::size_t>(wanted) * R.nj);
+                for (mwSize j = 0; j < R.nj; ++j) {
+                    std::copy_n(R.Jswe.begin() + static_cast<std::size_t>(R.nq) * j,
+                                wanted,
+                                trimmed.begin() + static_cast<std::size_t>(wanted) * j);
+                }
+                R.Jswe.swap(trimmed);
+            }
+            R.nq = wanted;
         }
     }
 
@@ -1084,13 +1174,50 @@ void delta(int lf,
 }
 
 // ----------------------------
-// FDC objective and derivative
+// FDC objectives and derivatives
 // ----------------------------
-double fdc_loss_native(const std::vector<double>& q, const mxArray* fdc)
+struct FDCMetrics {
+    double fdc = QNAN;
+    double p = QNAN;
+    double logp = QNAN;
+};
+
+double median_copy(std::vector<double> values)
 {
+    const size_t n = values.size();
+    if (n == 0) return QNAN;
+    const size_t mid = n / 2;
+    std::nth_element(values.begin(), values.begin() + mid, values.end());
+    double value = values[mid];
+    if ((n % 2) == 0) {
+        value = 0.5 * (value + *std::max_element(values.begin(), values.begin() + mid));
+    }
+    return value;
+}
+
+int fdc_formulation(const mxArray* loss)
+{
+    const mxArray* settings = fld(loss, "fdc", false);
+    if (!settings || !mxIsStruct(settings)) {
+        return 1;
+    }
+    const mxArray* value = fld(settings, "formulation", false);
+    if (!value || mxIsEmpty(value)) {
+        return 1;
+    }
+    const int form = (int)std::llround(scl(value, "loss.fdc.formulation"));
+    if (form < 1 || form > 3) {
+        mexErrMsgIdAndTxt("crr_model_mex:FDC", "FDC formulation must be 1, 2, or 3.");
+    }
+    return form;
+}
+
+FDCMetrics fdc_metrics_native(const std::vector<double>& q, const mxArray* fdc)
+{
+    FDCMetrics out;
     const size_t n = (size_t)std::llround(scl(fld(fdc, "n"), "fdc.n"));
     if (n == 0 || q.empty()) {
-        return QNAN;
+        return out;
     }
     if (q.size() != n) {
         mexErrMsgIdAndTxt("crr_model_mex:FDC", "FDC cache length mismatch.");
@@ -1118,12 +1245,49 @@ double fdc_loss_native(const std::vector<double>& q, const mxArray* fdc)
         Sqq += 2.0 * w * qi;
     }
     const double nn = (double)n * (double)n;
-    return (Sqy - 0.5 * (Sqq + Syy)) / nn;
+    out.fdc = std::max(0.0, (Sqy - 0.5 * (Sqq + Syy)) / nn);
+
+    double Dp = 0.0;
+    for (size_t i = 0; i < n; ++i) {
+        const double z = qs[i] - ys[i];
+        Dp += z * z;
+    }
+    out.p = Dp / (double)n;
+
+    double q0 = QNAN;
+    const mxArray* q0a = fld(fdc, "q0", false);
+    if (q0a && !mxIsEmpty(q0a)) {
+        q0 = scl(q0a, "fdc.q0");
+    }
+    if (!(std::isfinite(q0) && q0 > 0.0)) {
+        std::vector<double> positive;
+        positive.reserve(n);
+        for (double v : ys) {
+            if (v > 0.0) positive.push_back(v);
+        }
+        if (!positive.empty()) {
+            q0 = 0.01 * median_copy(positive);
+        }
+    }
+    if (std::isfinite(q0) && q0 > 0.0) {
+        double Dz = 0.0;
+        for (size_t i = 0; i < n; ++i) {
+            if (qs[i] + q0 <= 0.0 || ys[i] + q0 <= 0.0) {
+                Dz = QNAN;
+                break;
+            }
+            const double z = std::log(qs[i] + q0) - std::log(ys[i] + q0);
+            Dz += z * z;
+        }
+        if (std::isfinite(Dz)) out.logp = Dz / (double)n;
+    }
+    return out;
 }
 
 void fdc_delta_native(const std::vector<double>& y,
                       const std::vector<double>& q,
-                      std::vector<double>& d)
+                      std::vector<double>& d,
+                      int formulation)
 {
     const size_t n = q.size();
     d.assign(n, 0.0);
@@ -1133,6 +1297,35 @@ void fdc_delta_native(const std::vector<double>& y,
     std::vector<double> ys = y, qs = q;
     std::sort(ys.begin(), ys.end());
     std::sort(qs.begin(), qs.end());
+
+    if (formulation == 2 || formulation == 3) {
+        std::vector<size_t> order(n);
+        std::iota(order.begin(), order.end(), (size_t)0);
+        std::stable_sort(order.begin(), order.end(),
+                         [&](size_t a, size_t b) { return q[a] < q[b]; });
+        double q0 = QNAN;
+        if (formulation == 3) {
+            std::vector<double> positive;
+            positive.reserve(n);
+            for (double v : ys) {
+                if (v > 0.0) positive.push_back(v);
+            }
+            if (!positive.empty()) q0 = 0.01 * median_copy(positive);
+        }
+        for (size_t i = 0; i < n; ++i) {
+            const size_t k = order[i];
+            if (formulation == 2) {
+                d[k] = 2.0 * (qs[i] - ys[i]) / (double)n;
+            } else if (std::isfinite(q0) && q0 > 0.0 && qs[i] + q0 > 0.0) {
+                d[k] = 2.0 * (std::log(qs[i] + q0) - std::log(ys[i] + q0)) /
+                       ((double)n * (qs[i] + q0));
+            } else {
+                d[k] = QNAN;
+            }
+        }
+        return;
+    }
+
     const double nn = (double)n * (double)n;
     for (size_t i = 0; i < n; ++i) {
         const double x = q[i];
@@ -1604,8 +1797,8 @@ MB metric_block(const std::vector<double>& y,
 
 mxArray* metrics_struct(const MB& t,
                         const MB& e,
-                        double Dft,
-                        double Dfe,
+                        const FDCMetrics& ft,
+                        const FDCMetrics& fe,
                         const JKResult* jt,
                         const JKResult* je)
 {
@@ -1613,7 +1806,8 @@ mxArray* metrics_struct(const MB& t,
         "SARt",   "GLSt",  "NSEt",    "KGEt",    "KGE_rt",     "KGE_alphat", "KGE_betat",
         "Hubert", "RSSt",  "JKGEt",   "JKGE_Mt", "JKGE_Vt",    "JKGE_Ct",    "SARe",
         "GLSe",   "NSEe",  "KGEe",    "KGE_re",  "KGE_alphae", "KGE_betae",  "Hubere",
-        "RSSe",   "JKGEe", "JKGE_Me", "JKGE_Ve", "JKGE_Ce",    "Dfdct",      "Dfdce"};
+        "RSSe",   "JKGEe", "JKGE_Me", "JKGE_Ve", "JKGE_Ce",    "Dfdct",      "Dfdce",
+        "Dpt",    "Dpe",   "Dlogpt",  "Dlogpe"};
     mxArray* s = mxCreateStructMatrix(1, 1, sizeof(fn) / sizeof(fn[0]), fn);
     double v[] = {t.SAR,
                   t.GLS,
@@ -1641,8 +1835,12 @@ mxArray* metrics_struct(const MB& t,
                   je ? je->M : QNAN,
                   je ? je->V : QNAN,
                   je ? je->C : QNAN,
-                  Dft,
-                  Dfe};
+                  ft.fdc,
+                  fe.fdc,
+                  ft.p,
+                  fe.p,
+                  ft.logp,
+                  fe.logp};
     for (size_t i = 0; i < sizeof(v) / sizeof(v[0]); ++i) {
         mxSetFieldByNumber(s, 0, (int)i, mxCreateDoubleScalar(v[i]));
     }
@@ -1700,7 +1898,37 @@ std::vector<std::string> requested_states(const mxArray* a)
     return out;
 }
 
-std::vector<std::string> state_names(int model, int nstate)
+bool requested_name(const mxArray* a, const char* wanted)
+{
+    auto names = requested_states(a);
+    std::string target(wanted);
+    std::transform(target.begin(), target.end(), target.begin(), ::tolower);
+    for (auto name : names) {
+        std::transform(name.begin(), name.end(), name.begin(), ::tolower);
+        if (name == target) return true;
+    }
+    return false;
+}
+
+mxArray* named_obs(const Sim& sim, bool q, bool swe, bool sm)
+{
+    mxArray* s = mxCreateStructMatrix(1, 1, 0, nullptr);
+    if (q) { mxAddField(s, "Q"); mxSetField(s, 0, "Q", col(sim.q)); }
+    if (swe) { mxAddField(s, "SWE"); mxSetField(s, 0, "SWE", col(sim.swe)); }
+    if (sm) { mxAddField(s, "SM"); mxSetField(s, 0, "SM", col(sim.sm)); }
+    return s;
+}
+
+mxArray* named_jac(const Sim& sim, bool q, bool swe, bool sm)
+{
+    mxArray* s = mxCreateStructMatrix(1, 1, 0, nullptr);
+    if (q) { mxAddField(s, "Q"); mxSetField(s, 0, "Q", mat(sim.J, sim.nq, sim.nj)); }
+    if (swe) { mxAddField(s, "SWE"); mxSetField(s, 0, "SWE", mat(sim.Jswe, sim.nq, sim.nj)); }
+    if (sm) { mxAddField(s, "SM"); mxSetField(s, 0, "SM", mat(sim.Jsm, sim.nq, sim.nj)); }
+    return s;
+}
+
+std::vector<std::string> state_name(int model, int nstate)
 {
     std::vector<std::string> n;
     if (model == 1) {
@@ -1742,15 +1970,13 @@ std::vector<std::string> state_names(int model, int nstate)
         }
     } else if (model == 6) {
         n = {"snow_water_equivalent", "soil_moisture", "upper_zone", "lower_zone"};
+    } else if (model == 11) {
+        n = {"canopy_snow_storage", "canopy_liquid_storage",
+             "ground_snow_storage", "soil_storage", "baseflow_storage"};
     } else if (model == 7) {
         n = {"snow_water_equivalent", "soil_storage", "groundwater_storage"};
         for (int i = 1; i <= nstate - 3; ++i) {
             n.push_back("routing_storage_" + std::to_string(i));
-        }
-    } else if (model == 21) {
-        n = {"snow_water_equivalent", "production_store", "routing_store"};
-        for (int i = 1; i <= nstate - 3; ++i) {
-            n.push_back("routing_memory_" + std::to_string(i));
         }
     }
     if ((int)n.size() != nstate) {
@@ -1787,7 +2013,7 @@ states_struct(const Sim& sim, int model, const mxArray* mdl, const mxArray* reqS
     if (nstate < 1 || sim.Z.empty()) {
         mexErrMsgIdAndTxt("crr_model_mex:States", "State history unavailable.");
     }
-    auto names = state_names(model, nstate);
+    auto names = state_name(model, nstate);
     auto req = requested_states(reqStates);
     std::vector<int> keep;
     if (req.size() == 1 && (req[0] == "all" || req[0] == "ALL")) {
@@ -1858,7 +2084,7 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[])
     int model = (int)std::llround(scl(fld(mdl, "model"), "mdl.model"));
     int mcode = (int)std::llround(scl(fld(mdl, "mcode"), "mdl.mcode"));
     int lf = (int)std::llround(scl(fld(loss, "fnc"), "loss.fnc"));
-    if (model == 8) {
+    if (model == 99) {
         mexErrMsgIdAndTxt("crr_model_mex:UserModel",
                           "User model remains external; use crr_model_cpp.m.");
     }
@@ -1874,8 +2100,19 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[])
 
     const mxArray* st = fld(req, "states", false);
     const bool rqS = has_requested_states(st);
-
-    bool needG = rqG || rqA, needJ = rqJ || needG;
+    const mxArray* obsReq = fld(req, "obs", false);
+    const mxArray* jacReq = fld(req, "jac", false);
+    const bool rqObsQ = requested_name(obsReq, "Q");
+    const bool rqObsSwe = requested_name(obsReq, "SWE");
+    const bool rqObsSm = requested_name(obsReq, "SM");
+    const bool rqJacQ = requested_name(jacReq, "Q");
+    const bool rqJacSwe = requested_name(jacReq, "SWE");
+    const bool rqJacSm = requested_name(jacReq, "SM");
+    bool needG = rqG || rqA,
+         needJ = rqJ || needG || rqJacQ || rqJacSwe || rqJacSm;
+    const bool needSwe = rqObsSwe || rqJacSwe;
+    const bool needSm = rqObsSm || rqJacSm;
+    const bool needHistory = rqS;
 
     auto tr = transform(x, mdl);
     mxArray* out = mxCreateStructMatrix(1, 1, 0, nullptr);
@@ -1889,7 +2126,9 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[])
         return;
     }
 
-    auto sim = run_builtin(model, tr.th, tr.Jth, mdl, fld(dat, "meteo"), ode, needJ, rqS);
+    auto sim = run_builtin(model, tr.th, tr.Jth, mdl, fld(dat, "meteo"), ode,
+                           needJ, needHistory, needSwe, rqJacSwe,
+                           needSm, rqJacSm);
 
     /* A failed native integration is not a zero-flow simulation. Core
        output buffers are preallocated before integration and may contain
@@ -1899,10 +2138,60 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[])
     if (sim.fail) {
         std::fill(sim.q.begin(), sim.q.end(), QNAN);
         std::fill(sim.J.begin(), sim.J.end(), QNAN);
+        std::fill(sim.swe.begin(), sim.swe.end(), QNAN);
+        std::fill(sim.Jswe.begin(), sim.Jswe.end(), QNAN);
+        std::fill(sim.sm.begin(), sim.sm.end(), QNAN);
+        std::fill(sim.Jsm.begin(), sim.Jsm.end(), QNAN);
         std::fill(sim.Z.begin(), sim.Z.end(), QNAN);
     }
 
-    auto bad = vec(fld(dat, "bad"), "dat.bad");
+    mxAddField(out, "failed");
+    mxSetField(out, 0, "failed", mxCreateLogicalScalar(sim.fail));
+
+    const bool namedRequest = rqObsQ || rqObsSwe || rqObsSm ||
+                              rqJacQ || rqJacSwe || rqJacSm;
+    if (namedRequest) {
+        if (rqA) {
+            mexErrMsgIdAndTxt(
+                "crr_model_mex:NamedAttribution",
+                "Attribution is not defined for named observation requests.");
+        }
+        if (rqQ) {
+            mxAddField(out, "q");
+            mxSetField(out, 0, "q", col(sim.q));
+        }
+        if (rqG) {
+            mxAddField(out, "gradient");
+            mxSetField(out, 0, "gradient", mxCreateDoubleMatrix(d, 1, mxREAL));
+        }
+        if (rqM) {
+            mxAddField(out, "metrics");
+            mxSetField(out, 0, "metrics", mxCreateStructMatrix(1, 1, 0, nullptr));
+        }
+        if (rqS) {
+            mxAddField(out, "states");
+            mxSetField(out, 0, "states", states_struct(sim, model, mdl, st));
+        }
+        if (rqObsQ || rqObsSwe || rqObsSm) {
+            mxAddField(out, "obs");
+            mxSetField(out, 0, "obs", named_obs(sim, rqObsQ, rqObsSwe, rqObsSm));
+        }
+        if (rqJacQ || rqJacSwe || rqJacSm) {
+            mxAddField(out, "jac");
+            mxSetField(out, 0, "jac", named_jac(sim, rqJacQ, rqJacSwe, rqJacSm));
+        }
+        plhs[0] = mxCreateDoubleScalar(QNAN);
+        if (nlhs > 1) {
+            plhs[1] = out;
+        } else {
+            mxDestroyArray(out);
+        }
+        return;
+    }
+
+    const mxArray* obs = fld(dat, "obs");
+    const mxArray* obsQ = fld(obs, "Q");
+    auto bad = vec(fld(obsQ, "bad"), "dat.obs.Q.bad");
     bool local = false;
     const mxArray* la = fld(mdl, "local", false);
     if (la && !mxIsEmpty(la)) {
@@ -1916,7 +2205,8 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[])
         std::vector<mwIndex> z;
         for (auto i : a) {
             if ((size_t)i >= bad.size()) {
-                mexErrMsgIdAndTxt("crr_model_mex:Index", "Index outside dat.bad.");
+                mexErrMsgIdAndTxt("crr_model_mex:Index",
+                                  "Index outside dat.obs.Q.bad.");
             }
             if (bad[i] == 0) {
                 z.push_back(i);
@@ -1925,9 +2215,10 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[])
         return z;
     };
     auto idtr = filterIds(tr0), idev = filterIds(ev0);
-    auto ya = vec(fld(dat, "y_n"), "dat.y_n");
+    auto ya = vec(fld(obsQ, "value"), "dat.obs.Q.value");
     if (ya.size() != sim.q.size()) {
-        mexErrMsgIdAndTxt("crr_model_mex:Length", "q and y_n differ.");
+        mexErrMsgIdAndTxt("crr_model_mex:Length",
+                          "q and dat.obs.Q.value differ.");
     }
     auto sel = [&](const std::vector<double>& v, const std::vector<mwIndex>& id) {
         std::vector<double> z;
@@ -1947,11 +2238,15 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[])
         re[i] = ye[i] - qe[i];
     }
 
-    double L = QNAN, Dft = QNAN, Dfe = QNAN;
+    double L = QNAN;
+    FDCMetrics Dft, Dfe;
     std::vector<double> del;
     JKResult jkt, jke;
     bool haveJK = false;
     const mxArray* stats = fld(dat, "stats");
+    const mxArray* statsQ = fld(stats, "Q");
+    const mxArray* statsQt = fld(statsQ, "train");
+    const mxArray* statsQe = fld(statsQ, "eval");
     if (rt.empty()) {
         del.clear();
     } else if (lf == 1) {
@@ -1971,7 +2266,7 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[])
             delta(2, yt, qt, del);
         }
     } else if (lf == 3) {
-        double T = scl(fld(stats, "TSSt"), "dat.stats.TSSt");
+        double T = scl(fld(statsQt, "TSS"), "dat.stats.Q.train.TSS");
         if (std::isfinite(T) && T > 0) {
             double R = 0;
             for (double e : rt) {
@@ -1985,21 +2280,23 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[])
     } else if (lf == 4) {
         auto z = kge(yt,
                      qt,
-                     scl(fld(stats, "mut"), "dat.stats.mut"),
-                     scl(fld(stats, "stdt"), "dat.stats.stdt"));
+                     scl(fld(statsQt, "mean"), "dat.stats.Q.train.mean"),
+                     scl(fld(statsQt, "std"), "dat.stats.Q.train.std"));
         L = 1 - z.K;
         if (needG) {
             delta(4, yt, qt, del);
         }
     } else if (lf == 5) {
-        L = huber(rt, scl(fld(stats, "Syt"), "dat.stats.Syt"), needG ? &del : nullptr);
+        L = huber(rt, scl(fld(statsQt, "huber_scale"),
+                          "dat.stats.Q.train.huber_scale"), needG ? &del : nullptr);
     } else if (lf == 6) {
-        const mxArray* fdc = fld(dat, "fdc");
+        const mxArray* fdc = fld(fld(dat, "fdc"), "Q");
         const mxArray* ft = fld(fdc, "t");
-        Dft = fdc_loss_native(qt, ft);
-        L = Dft;
+        const int form = fdc_formulation(loss);
+        Dft = fdc_metrics_native(qt, ft);
+        L = (form == 1) ? Dft.fdc : ((form == 2) ? Dft.p : Dft.logp);
         if (needG) {
-            fdc_delta_native(yt, qt, del);
+            fdc_delta_native(yt, qt, del, form);
         }
     } else if (lf == 7) {
         int method = (int)std::llround(scl(fld(loss, "method"), "loss.method"));
@@ -2023,10 +2320,7 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[])
         L = 1 - jkt.JK;
         haveJK = true;
         if (needG) {
-            del.resize(idtr.size());
-            for (size_t i = 0; i < idtr.size(); ++i) {
-                del[i] = jkt.delta[idtr[i]];
-            }
+            del = jkt.delta;
         }
     }
 
@@ -2042,39 +2336,45 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[])
     if (needG) {
         grad.assign(d, QNAN);
         if (!rt.empty()) {
-            if (del.size() != idtr.size()) {
+            const bool fullJkge = lf == 7 && del.size() == sim.q.size();
+            const size_t ng = fullJkge ? sim.q.size() : idtr.size();
+            if (del.size() != ng) {
                 mexErrMsgIdAndTxt("crr_model_mex:Delta", "Delta length mismatch.");
             }
             std::fill(grad.begin(), grad.end(), 0.0);
             for (size_t j = 0; j < d; ++j) {
-                for (size_t i = 0; i < idtr.size(); ++i) {
-                    grad[j] += Jt[i + idtr.size() * j] * del[i];
+                for (size_t i = 0; i < ng; ++i) {
+                    const double Jij = fullJkge
+                        ? sim.J[i + (size_t)sim.nq * j]
+                        : Jt[i + idtr.size() * j];
+                    grad[j] += Jij * del[i];
                 }
             }
         }
     }
 
     if (rqM) {
-        const mxArray* fdc = fld(dat, "fdc");
-        if (!std::isfinite(Dft)) {
-            Dft = fdc_loss_native(qt, fld(fdc, "t"));
+        const mxArray* fdc = fld(fld(dat, "fdc"), "Q");
+        if (!std::isfinite(Dft.fdc) || !std::isfinite(Dft.p) ||
+            !std::isfinite(Dft.logp)) {
+            Dft = fdc_metrics_native(qt, fld(fdc, "t"));
         }
         const mxArray* fe = fld(fdc, "e", false);
         if (!qe.empty() && fe && scl(fld(fe, "n"), "fdc.e.n") > 0) {
-            Dfe = fdc_loss_native(qe, fe);
+            Dfe = fdc_metrics_native(qe, fe);
         }
         MB mt = metric_block(yt,
                              qt,
-                             scl(fld(stats, "mut"), "stats.mut"),
-                             scl(fld(stats, "stdt"), "stats.stdt"),
-                             scl(fld(stats, "TSSt"), "stats.TSSt"),
-                             scl(fld(stats, "Syt"), "stats.Syt"));
+                             scl(fld(statsQt, "mean"), "stats.Q.train.mean"),
+                             scl(fld(statsQt, "std"), "stats.Q.train.std"),
+                             scl(fld(statsQt, "TSS"), "stats.Q.train.TSS"),
+                             scl(fld(statsQt, "huber_scale"), "stats.Q.train.huber_scale"));
         MB me = metric_block(ye,
                              qe,
-                             scl(fld(stats, "mue"), "stats.mue"),
-                             scl(fld(stats, "stde"), "stats.stde"),
-                             scl(fld(stats, "TSSe"), "stats.TSSe"),
-                             scl(fld(stats, "Sye"), "stats.Sye"));
+                             scl(fld(statsQe, "mean"), "stats.Q.eval.mean"),
+                             scl(fld(statsQe, "std"), "stats.Q.eval.std"),
+                             scl(fld(statsQe, "TSS"), "stats.Q.eval.TSS"),
+                             scl(fld(statsQe, "huber_scale"), "stats.Q.eval.huber_scale"));
         if (lf == 7 && haveJK) {
             int Mdef = 2;
             const mxArray* ma = fld(loss, "M", false);
@@ -2115,12 +2415,25 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[])
     }
     if (rqA) {
         mxAddField(out, "attribution");
-        mxSetField(
-            out, 0, "attribution", attribution_struct(Jt, del, grad, mdl, idtr.size(), d));
+        if (lf == 7 && del.size() == sim.q.size()) {
+            mxSetField(out, 0, "attribution",
+                       attribution_struct(sim.J, del, grad, mdl, sim.q.size(), d));
+        } else {
+            mxSetField(out, 0, "attribution",
+                       attribution_struct(Jt, del, grad, mdl, idtr.size(), d));
+        }
     }
     if (rqS) {
         mxAddField(out, "states");
         mxSetField(out, 0, "states", states_struct(sim, model, mdl, st));
+    }
+    if (rqObsQ || rqObsSwe || rqObsSm) {
+        mxAddField(out, "obs");
+        mxSetField(out, 0, "obs", named_obs(sim, rqObsQ, rqObsSwe, rqObsSm));
+    }
+    if (rqJacQ || rqJacSwe || rqJacSm) {
+        mxAddField(out, "jac");
+        mxSetField(out, 0, "jac", named_jac(sim, rqJacQ, rqJacSwe, rqJacSm));
     }
     plhs[0] = mxCreateDoubleScalar(L);
     if (nlhs > 1) {

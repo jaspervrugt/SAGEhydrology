@@ -1,33 +1,39 @@
 function [dat,A,latlon,bas] = filter_basins( ...
     dat,A,latlon,bas,eligibility)
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%FILTER_BASINS Remove data-ineligible basins from a SAGE population
+%FILTER_BASINS Remove data-ineligible basins.
+%
+%  Retain eligible training basins before eligible evaluation basins and
+%  compact basin-indexed data, attributes, coordinates, and metadata.
 %
 % SYNOPSIS:
 %   [dat,A,latlon,bas] = filter_basins( ...
 %       dat,A,latlon,bas,eligibility)
 %
-% INPUTS:
-%   dat          K-by-1 cell array with basin time-series structures
-%   A            r-by-K matrix of static basin attributes
-%   latlon       K-by-2 basin-coordinate matrix (may be empty)
-%   bas          basin structure; training basins must precede evaluation
-%                basins and .K, .K_t, and .K_e must be defined
-%   eligibility output structure returned by check_basins
+% INPUT ARGUMENTS:
+%   dat             K-by-1 cell array of basin time-series structures
+%   A               r-by-K static attributes; may be empty
+%   latlon          K-by-2 basin coordinates; may be empty
+%   bas             selected-basin metadata
+%    .K              total requested basins
+%    .K_t            training basins, listed first
+%    .K_e            evaluation basins
+%   eligibility     basin eligibility returned by check_basins
+%    .valid          K-by-1 logical retention mask
 %
-% OUTPUTS:
-%   dat,A,latlon basin-indexed inputs compacted to eligible basins
-%   bas          compacted basin metadata and updated K, K_t, K_e, id_t,
-%                id_e, and id_plot. The requested population and exclusion
-%                audit are retained in bas.data_quality.
+% OUTPUT ARGUMENTS:
+%   dat             time-series entries for eligible basins
+%   A               attributes for eligible basins
+%   latlon          coordinates for eligible basins
+%   bas             compacted metadata and exclusion audit
+%    .K              retained basin count
+%    .K_t            retained training count
+%    .K_e            retained evaluation count
+%    .data_quality   requested/active/excluded basin audit
 %
-% DESCRIPTION:
-%   Eligible training basins are retained first, followed by eligible
-%   evaluation basins. This preserves the ordering assumed throughout
-%   SAGE. Known basin-indexed metadata fields (id_gauge, gname, and zone)
-%   are subset consistently. Scalar basin configuration remains unchanged.
+% NOTES:
+%   Basin ordering is preserved within each training/evaluation group.
 %
-% SEE ALSO: check_basins, prep_stats, init_args
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % © Written by Jasper A. Vrugt, Aug. 2026                                 %
 % University of California, Irvine                                        %

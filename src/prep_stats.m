@@ -1,45 +1,36 @@
 function [dat,loss] = prep_stats(dat,mdl,split,loss)
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%PREP_STATS Prepare observed discharge statistics for loss functions
+%PREP_STATS Prepare observation-specific loss statistics.
 %
-% SYNOPSIS: [dat,loss] = prep_stats(dat,mdl,split,loss)
-%   dat         cell structure with observed discharge records
-%    {k}.y_n     nx1 measured discharge vector for basin k
-%   mdl         structure with model and split information
-%    .id_train  training-period indices
-%    .id_eval   evaluation-period indices
-%    .sp_method split design
-%   split       structure with temporal information
-%    .dt        data resolution: 1 = daily, 24 = hourly, 96 = 15-minute
-%    .dt0       first datetime of record, required for JKGE method 4
-%   loss        loss-function settings
-%    .fnc       scalar loss function
-%    .n_win     JKGE window length in days
-%    .method    JKGE benchmark method
-%                 1 = moving-average mean
-%                 2 = section-wise mean
-%                 3 = long-term mean
-%                 4 = monthly climatology
-%   dat         OUTPUT: updated cell structure
-%    {k}.stats   observed discharge statistics for train/eval periods
-%    {k}.jkge    JKGE benchmark vectors and cached bookkeeping
-%    {k}.fdc     cached observed FDC quantities for train/eval periods
-%    {k}.hydro   reserved for hydrologic metrics/signatures calculated
-%                from observed discharge for the train/eval periods
-%   loss        OUTPUT: updated loss-function settings
-%    .meta      shared JKGE metadata, including month labels if needed
-%    .fdc.D0t   Kx1 FDC references from training observations
-%    .fdc.D0e   Kx1 FDC references from evaluation observations
+%  Caches valid indices, reference statistics, JKGE benchmarks, and FDC
+%  quantities for each selected observable.
 %
-% NOTES:
-%   1. For JKGE, observed benchmark vectors are stored per basin.
-%   2. Benchmark bookkeeping is cached for full, training, and evaluation
-%      records to avoid repeated construction during optimization.
-%   3. No dense or sparse n-by-n benchmark operators are formed.
-%   4. Future observation-derived hydrologic metrics should be computed
-%      here once during initialization and stored in dat{k}.hydro, with
-%      separate training/evaluation fields. They should not be rebuilt
-%      during optimization iterations.
+% SYNOPSIS:
+%   [dat,loss] = prep_stats(dat,mdl,split,loss)
+%
+% INPUT ARGUMENTS:
+%   dat             basin records with named Q, SWE, or SM observations
+%   mdl             training/evaluation indices and split method
+%   split           resolution and time-origin information
+%    .dt             samples per day: 1, 24, or 96
+%    .dt0            record start time for monthly JKGE
+%   loss            selected loss and observation settings
+%    .fnc            loss-function identifier
+%    .observed       selected Q, SWE, or SM names
+%    .n_win          JKGE window length in days
+%    .method         JKGE benchmark method (1 to 4)
+%    .fdc            FDC formulation settings
+%     .kosugi          optional Kosugi preprocessing switch [false]
+%
+% OUTPUT ARGUMENTS:
+%   dat             basin records with prepared loss statistics
+%    {k}.stats       named train/evaluation statistics and indices
+%    {k}.jkge        named JKGE benchmark caches
+%    {k}.fdc         named train/evaluation FDC caches
+%    {k}.hydro.fdc.kosugi  optional training-derived Kosugi parameters
+%   loss            loss settings with shared benchmark metadata
+%    .meta           shared JKGE time metadata
+%    .fdc            observation-specific FDC references
 %
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % © Written by Jasper A. Vrugt, Apr. 2026                                 %
@@ -56,7 +47,8 @@ function [dat,loss] = prep_stats(dat,mdl,split,loss)
             'loss must be a structure.']);
     end
     
-    if ~isfield(loss,'fnc') || isempty(loss.fnc)
+    if ~isfield(loss,'fnc') ...
+            || isempty(loss.fnc)
         error(['      Error:prep_stats: ' ...
             'loss.fnc is required.']);
     end
@@ -74,6 +66,20 @@ function [dat,loss] = prep_stats(dat,mdl,split,loss)
     
     dt = double(split.dt);
     K = numel(dat);
+    activeNames = "Q";
+    if isfield(loss,'observed') ...
+            && ~isempty(loss.observed)
+        activeNames = upper(strtrim(string(loss.observed(:))));
+        activeNames = unique(activeNames(strlength(activeNames)>0), ...
+            'stable');
+    end
+    unknown = setdiff(activeNames,["Q";"SWE";"SM"]);
+    if ~isempty(unknown)
+        error('prep_stats:UnknownObservation', ...
+            'Unknown observation(s): %s.', ...
+            strjoin(cellstr(unknown),', '));
+    end
+    prepNames = activeNames(:);
     
     global_id_train = [];
     global_id_eval = [];
@@ -105,7 +111,8 @@ function [dat,loss] = prep_stats(dat,mdl,split,loss)
         % ---------------------------------------
         nJKGE_days = 31;
     
-        if ~isfield(loss,'n_win') || isempty(loss.n_win)
+        if ~isfield(loss,'n_win') ...
+                || isempty(loss.n_win)
     
             fprintf(['      Warning:prep_stats: ' ...
                 'loss.n_win not specified; ' ...
@@ -133,7 +140,8 @@ function [dat,loss] = prep_stats(dat,mdl,split,loss)
         % ---------------------------------
         method = 1;
     
-        if isfield(loss,'method') && ~isempty(loss.method)
+        if isfield(loss,'method') ...
+                && ~isempty(loss.method)
     
             if isscalar(loss.method) ...
                     && isnumeric(loss.method) ...
@@ -209,7 +217,7 @@ function [dat,loss] = prep_stats(dat,mdl,split,loss)
                     'climatology [method = 4].']);
             end
     
-            n_all = numel(dat{1}.y_n);
+            n_all = local_record_length(dat,prepNames);
             t0 = split.dt0;
     
             stepDuration = days(1/dt);
@@ -240,15 +248,48 @@ function [dat,loss] = prep_stats(dat,mdl,split,loss)
             || ~isstruct(loss.fdc)
         loss.fdc = struct();
     end
-    loss.fdc.D0t = nan(K,1);
-    loss.fdc.D0e = nan(K,1);
+    if ~isfield(loss.fdc,'formulation') ...
+            || isempty(loss.fdc.formulation)
+        loss.fdc.formulation = 1;
+    end
+    loss.fdc.formulation = local_fdc_formulation( ...
+        loss.fdc.formulation);
 
-    fprintf(['... Preparing discharge ' ...
+    % --------------------------------------------------------------
+    % Optional Kosugi FDC fit used by FDC-constrained dynamic models.
+    % The fit is observation-derived and is performed ONCE using only
+    % valid training-period Q. Set loss.fdc.kosugi = false to deactivate.
+    % --------------------------------------------------------------
+    if ~isfield(loss.fdc,'kosugi') ...
+            || isempty(loss.fdc.kosugi)
+        loss.fdc.kosugi = false;
+    end
+    if ~(isscalar(loss.fdc.kosugi) ...
+            && (islogical(loss.fdc.kosugi) ...
+            || isnumeric(loss.fdc.kosugi)) ...
+            && isfinite(double(loss.fdc.kosugi)))
+        error('prep_stats:Kosugi', ...
+            'loss.fdc.kosugi must be a scalar logical/numeric flag.');
+    end
+    doKosugi = logical(loss.fdc.kosugi);
+
+    emptyReferences = struct('D0t',nan(K,1),'D0e',nan(K,1), ...
+        'D0pt',nan(K,1),'D0pe',nan(K,1), ...
+        'D0logpt',nan(K,1),'D0logpe',nan(K,1));
+    knownNames = {'Q','SWE','SM'};
+    for j = 1:numel(knownNames)
+        if isfield(loss.fdc,knownNames{j})
+            loss.fdc = rmfield(loss.fdc,knownNames{j});
+        end
+    end
+    for j = 1:numel(prepNames)
+        loss.fdc.(char(prepNames(j))) = emptyReferences;
+    end
+
+    fprintf(['... Preparing observation ' ...
         'statistics %3d%%'],0);
     
     for k = 1:K
-        y_n = double(dat{k}.y_n(:));
-        
         if isfield(mdl,'local') ...
                 && mdl.local == 1 ...
                 && isfield(dat{k},'id_train') ...
@@ -272,106 +313,88 @@ function [dat,loss] = prep_stats(dat,mdl,split,loss)
                 'empty for basin %d.'],k);
         end
     
-        if max(id_train) > numel(y_n) ...
-                || any(id_train < 1)
-            error(['      Error:prep_stats: ' ...
-                'training indices exceed ' ...
-                'y_n length for basin %d.'],k);
-        end
-    
-        if hasEval ...
-                && (max(id_eval) > numel(y_n) ...
-                || any(id_eval < 1))
-            error(['      Error:prep_stats: ' ...
-                'evaluation indices exceed ' ...
-                'y_n length for basin %d.'],k);
-        end
-    
         % -----------------
         % initialize fields
         % -----------------
-        dat{k}.stats = struct( ...
-            'mut',[], ...
-            'stdt',[], ...
-            'TSSt',[], ...
-            'Syt',[], ...
-            'mue',[], ...
-            'stde',[], ...
-            'TSSe',[], ...
-            'Sye',[]);
-        dat{k}.jkge = struct( ...
-            'm_y',[], ...
-            'cache',[], ...
-            'cache_t',[], ...
-            'cache_e',[]);
+        dat{k}.jkge = struct();
     
-        dat{k}.fdc = struct( ...
-            't',local_empty_fdc_cache(), ...
-            'e',local_empty_fdc_cache());
-
-        % ---------------
-        % training period
-        % ---------------
-        if isfield(dat{k},'bad') ...
-                && ~isempty(dat{k}.bad)
-            bad = dat{k}.bad(:);
-            id_train = id_train(~bad(id_train));
+        % -----------------------------------------------------------
+        % Observation-specific preparation for future multi-data loss
+        % -----------------------------------------------------------
+        dat{k}.stats = struct();
+        dat{k}.fdc = struct();
+        if ~isfield(dat{k},'hydro') ...
+                || ~isstruct(dat{k}.hydro)
+            dat{k}.hydro = struct();
         end
-        yt = y_n(id_train);
-    
-        dat{k}.stats.mut = mean(yt, ...
-            'omitnan');
-        dat{k}.stats.stdt = std(yt, ...
-            'omitnan');
-        dat{k}.stats.TSSt = sum((yt - ...
-            dat{k}.stats.mut).^2, ...
-            'omitnan');
-        dat{k}.stats.Syt = ...
-            local_huber_scale(yt);
+        if ~isfield(dat{k}.hydro,'fdc') ...
+                || ~isstruct(dat{k}.hydro.fdc)
+            dat{k}.hydro.fdc = struct();
+        end
+        if ~doKosugi && isfield(dat{k}.hydro.fdc,'kosugi')
+            dat{k}.hydro.fdc = rmfield(dat{k}.hydro.fdc,'kosugi');
+        end
 
-        % Cached observed quantities for fast FDC distance
-        dat{k}.fdc.t = local_fdc_cache(yt);
-        loss.fdc.D0t(k) = dat{k}.fdc.t.D0;
-
-        % -----------------
-        % evaluation period
-        % -----------------
-        if hasEval ...
-                && ~isempty(id_eval)
-            if isfield(dat{k},'bad') ...
-                    && ~isempty(dat{k}.bad)
-                bad = dat{k}.bad(:);
-                id_eval = id_eval(~bad(id_eval));
+        for j = 1:numel(prepNames)
+            name = char(prepNames(j));
+            obs = [];
+            if isfield(dat{k},'obs') ...
+                    && isfield(dat{k}.obs,name)
+                obs = dat{k}.obs.(name);
             end
-            ye = y_n(id_eval);
-            
-            dat{k}.stats.mue  = mean(ye, ...
-                'omitnan');
-            dat{k}.stats.stde = std(ye, ...
-                'omitnan');
-            dat{k}.stats.TSSe = sum((ye - ...
-                dat{k}.stats.mue).^2, ...
-                'omitnan');
-            dat{k}.stats.Sye = ...
-                local_huber_scale(ye);
-            % Cached observed quantities for fast FDC distance
-            dat{k}.fdc.e = local_fdc_cache(ye);
-            loss.fdc.D0e(k) = dat{k}.fdc.e.D0;
-        end
-    
-        % ----------------------
-        % JKGE benchmark vectors
-        % ----------------------
-        if doJKGE
-            m_y = jkge_benchmark(y_n,method, ...
-                n_win,loss.meta.mo_all);
-        
-            dat{k}.jkge.m_y = single(m_y);
-    
-            dat{k}.jkge.cache = jkge_cache( ...
-                y_n,method,n_win, ...
-                loss.meta.mo_all);
-        
+            [stats,fdc] = local_observation_block( ...
+                obs,id_train,id_eval);
+            dat{k}.stats.(name) = stats;
+            dat{k}.fdc.(name) = fdc;
+            loss.fdc.(name) = local_store_fdc_reference( ...
+                loss.fdc.(name),fdc,k);
+
+            % ------------------------------------------------------
+            % Robust three-parameter Kosugi fit for discharge only.
+            % IMPORTANT: use TRAINING observations only. p0 is the
+            % empirical zero-flow probability; a,b,c describe the
+            % conditional positive-flow Kosugi component when p0>0.
+            % ------------------------------------------------------
+            if doKosugi && strcmp(name,'Q') ...
+                    && stats.train.has_data
+                q_train = double(obs.value(stats.train.indices));
+                dat{k}.hydro.fdc.kosugi = fit_kosugi_fdc(q_train);
+            end
+
+            hasObs = ~isempty(obs) ...
+                && isfield(obs,'value') ...
+                && ~isempty(obs.value);
+            if doJKGE && hasObs
+                y_n = double(obs.value(:));
+                if max(id_train) > numel(y_n) ...
+                        || any(id_train < 1)
+                    error('prep_stats:TrainingIndex', ...
+                        ['Training indices exceed the %s record ' ...
+                         'for basin %d.'],name,k);
+                end
+                if hasEval ...
+                        && (max(id_eval) > numel(y_n) ...
+                        || any(id_eval < 1))
+                    error('prep_stats:EvaluationIndex', ...
+                        ['Evaluation indices exceed the %s record ' ...
+                         'for basin %d.'],name,k);
+                end
+                m_y = jkge_benchmark(y_n,method, ...
+                    n_win,loss.meta.mo_all);
+                dat{k}.jkge.(name) = struct( ...
+                    'm_y',single(m_y), ...
+                    'cache',jkge_cache(y_n,method,n_win, ...
+                    loss.meta.mo_all));
+                if strcmp(name,'Q')
+                    dat{k}.jkge.m_y = ...
+                        dat{k}.jkge.Q.m_y;
+                    dat{k}.jkge.cache = ...
+                        dat{k}.jkge.Q.cache;
+                end
+            elseif doJKGE
+                dat{k}.jkge.(name) = struct( ...
+                    'm_y',[],'cache',[]);
+            end
         end
     
         if mod(k,20)==0 ...
@@ -383,6 +406,34 @@ function [dat,loss] = prep_stats(dat,mdl,split,loss)
     
     fprintf('\b\b\b\b... Done\n');
 
+end
+
+function n = local_record_length(dat,names)
+%LOCAL_RECORD_LENGTH Find the common model-axis length.
+
+    n = [];
+    for k = 1:numel(dat)
+        for j = 1:numel(names)
+            name = char(names(j));
+            if isfield(dat{k},'obs') ...
+                    && isfield(dat{k}.obs,name) ...
+                    && isfield(dat{k}.obs.(name),'value') ...
+                    && ~isempty(dat{k}.obs.(name).value)
+                candidate = numel(dat{k}.obs.(name).value);
+                if isempty(n)
+                    n = candidate;
+                elseif candidate ~= n
+                    error('prep_stats:ObservationLength', ...
+                        ['Selected observation records must share ' ...
+                         'one model time axis.']);
+                end
+            end
+        end
+    end
+    if isempty(n)
+        error('prep_stats:NoObservations', ...
+            'No selected observation records are available.');
+    end
 end
 
 % ================
@@ -416,7 +467,6 @@ function S_y = local_huber_scale(y)
             || S_y <= 0
 
         yp = y(y > 0);
-
         if ~isempty(yp)
             S_y = median(yp);
         end
@@ -446,8 +496,12 @@ function fdc = local_empty_fdc_cache()
         'ys',[], ...
         'Py',[], ...
         'S_yy',NaN, ...
+        'q0',NaN, ...
+        'log_ys',[], ...
         'n',0, ...
-        'D0',NaN);
+        'D0',NaN, ...
+        'D0_p',NaN, ...
+        'D0_logp',NaN);
 
 end
 
@@ -492,10 +546,151 @@ function fdc = local_fdc_cache(y)
     % Numerical safeguard only
     D0 = max(D0,0);
 
+    % The probability-space formulations use the same constant-median
+    % reference. The logarithmic offset equals one percent of the median
+    % positive observed discharge, as documented in Appendix C.
+    D0_p = mean((ymed - ys).^2);
+    yp = ys(ys > 0);
+    if isempty(yp)
+        q0 = NaN;
+        log_ys = nan(size(ys));
+        D0_logp = NaN;
+    else
+        q0 = 0.01*median(yp);
+        log_ys = log(ys + q0);
+        D0_logp = mean((log(ymed + q0) - log_ys).^2);
+    end
+
     fdc = struct( ...
         'ys',ys, ...
         'Py',Py, ...
         'S_yy',S_yy, ...
+        'q0',q0, ...
+        'log_ys',log_ys, ...
         'n',n, ...
-        'D0',D0);
+        'D0',D0, ...
+        'D0_p',D0_p, ...
+        'D0_logp',D0_logp);
+end
+
+function [stats,fdc] = local_observation_block(obs,id_train,id_eval)
+%LOCAL_OBSERVATION_BLOCK Prepare one observation type independently.
+
+    emptyPeriod = struct('mean',NaN,'std',NaN,'TSS',NaN, ...
+        'huber_scale',NaN,'n',0,'indices',zeros(0,1), ...
+        'has_data',false,'variable',false);
+    stats = struct('available',false,'active',false, ...
+        'units',"",'source',"",'n_total',0, ...
+        'train',emptyPeriod,'eval',emptyPeriod);
+    fdc = struct('t',local_empty_fdc_cache(), ...
+        'e',local_empty_fdc_cache());
+
+    if isempty(obs) ...
+            || ~isstruct(obs) ...
+            || ~isfield(obs,'value') ...
+            || isempty(obs.value)
+        return
+    end
+    y = double(obs.value(:));
+    stats.n_total = numel(y);
+    if isfield(obs,'units') ...
+            && ~isempty(obs.units)
+        stats.units = string(obs.units);
+    end
+    if isfield(obs,'source') ...
+            && ~isempty(obs.source)
+        stats.source = string(obs.source);
+    end
+    bad = false(size(y));
+    if isfield(obs,'bad') ...
+            && ~isempty(obs.bad)
+        if numel(obs.bad) ~= numel(y)
+            error('prep_stats:ObservationMaskLength', ...
+                ['Observation value and ' ...
+                'bad-mask lengths differ.']);
+        end
+        bad = logical(obs.bad(:));
+    end
+    bad = bad ...
+        | ~isfinite(y);
+    stats.available = any(~bad);
+    stats.train = local_period_stats(y,bad,id_train);
+    stats.eval = local_period_stats(y,bad,id_eval);
+    stats.active = stats.train.has_data;
+    fdc.t = local_fdc_cache(y(stats.train.indices));
+    fdc.e = local_fdc_cache(y(stats.eval.indices));
+end
+
+function period = local_period_stats(y,bad,indices)
+%LOCAL_PERIOD_STATS Statistics and valid indices for one period.
+
+    period = struct('mean',NaN,'std',NaN,'TSS',NaN, ...
+        'huber_scale',NaN,'n',0,'indices',zeros(0,1), ...
+        'has_data',false,'variable',false);
+    if isempty(indices)
+        return
+    end
+    indices = double(indices(:));
+    if any(indices < 1) ...
+            || any(indices ~= fix(indices)) ...
+            || any(indices > numel(y))
+        error('prep_stats:ObservationIndex', ...
+            ['Observation-period indices ' ...
+            'are outside the data record.']);
+    end
+    indices = indices(~bad(indices));
+    values = y(indices);
+    period.indices = indices;
+    period.n = numel(values);
+    period.has_data = period.n > 0;
+    if ~period.has_data
+        return
+    end
+    period.mean = mean(values);
+    period.std = std(values);
+    period.TSS = sum((values-period.mean).^2);
+    period.huber_scale = local_huber_scale(values);
+    scale = max(1,max(abs(values)));
+    period.variable = period.n >= 2 ...
+        && isfinite(period.TSS) ...
+        && period.TSS > eps(scale^2)*period.n;
+end
+
+function refs = local_store_fdc_reference(refs,fdc,k)
+%LOCAL_STORE_FDC_REFERENCE Store per-observation FDC reference constants.
+
+    refs.D0t(k) = fdc.t.D0;
+    refs.D0e(k) = fdc.e.D0;
+    refs.D0pt(k) = fdc.t.D0_p;
+    refs.D0pe(k) = fdc.e.D0_p;
+    refs.D0logpt(k) = fdc.t.D0_logp;
+    refs.D0logpe(k) = fdc.e.D0_logp;
+end
+
+function formulation = local_fdc_formulation(value)
+%LOCAL_FDC_FORMULATION Normalize the public 6a/6b/6c selection.
+
+    if isnumeric(value) ...
+            && isscalar(value) ...
+            && isfinite(value)
+        formulation = double(value);
+    else
+        key = lower(regexprep(char(string(value)),'[^a-z0-9]',''));
+        switch key
+            case {'1','a','fdc','dfdc','physical','physicalcdf'}
+                formulation = 1;
+            case {'2','b','p','dp','quantile'}
+                formulation = 2;
+            case {'3','c','logp','dlogp','logquantile'}
+                formulation = 3;
+            otherwise
+                formulation = NaN;
+        end
+    end
+    if ~ismember(formulation,1:3)
+        error('prep_stats:BadFDCFormulation', ...
+            ['loss.fdc.formulation must ' ...
+            'be 1 (d_fdc), 2 (d_p), ' ...
+            'or 3 (d_logp).']);
+    end
 end

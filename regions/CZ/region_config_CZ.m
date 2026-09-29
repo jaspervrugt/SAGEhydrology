@@ -142,6 +142,10 @@ function S = local_attribute_schema()
     S.id.output_lowercase = false;
     S.metadata.name_sources = {'gauge_name'};
     S.metadata.name_transform = '';
+    % Verified CHMI station names are applied only where the official
+    % profile coordinate is a unique match within 100 m. Unmatched gauges
+    % retain their CAMELS-CZ identifier as the display name.
+    S.metadata.name_override_file = 'station_names_CZ.csv';
     S.region = 'CAMELS_CZ';
     S.zone.region = 'CZ';
     S.progress.label = '... Reading CAMELS-CZ generic attributes';

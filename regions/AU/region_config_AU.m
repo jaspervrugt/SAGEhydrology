@@ -1,5 +1,5 @@
 function R = region_config_AU()
-%REGION_CONFIG_AU Regional defaults for CAMELS-AU.
+%REGION_CONFIG_AU Regional defaults for CAMELS-AUS v2.
 %
 % All X.paths fields are relative to Data/<R.data_root>.
 % Dates use dd/MM/yyyy and water-year boundaries.
@@ -8,7 +8,7 @@ function R = region_config_AU()
     R.code = 'CAMELS_AU';
     R.acronym = 'AU';
     R.name = 'Australia';
-    R.dataset = 'CAMELS-AU';
+    R.dataset = 'CAMELS-AUS v2';
     R.data_root = 'CAMELS_AU';
     R.resolutions = {'Daily'};
     R.default_resolution = 'Daily';
@@ -17,9 +17,9 @@ function R = region_config_AU()
     X = struct();
     X.label = 'Daily';
     X.dt = 1;
-    X.basins.universe = 222;
-    X.basins.training = 170;
-    X.basins.evaluation = 52;
+    X.basins.universe = 561;
+    X.basins.training = 430;
+    X.basins.evaluation = 131;
     X.period.spinup_days = 365;
     X.period.manual.train_start = '01/10/1999';
     X.period.manual.train_end = '30/09/2014';
@@ -31,18 +31,18 @@ function R = region_config_AU()
     X.paths.meteo = fullfile('daily');
     X.paths.discharge = fullfile('daily','streamflow');
     % Meteorological/PET controls shown by SAGE-GUI.
-    X.meteo.product.items = {'CAMELS-AU [daily]'};
-    X.meteo.product.default = 'CAMELS-AU [daily]';
+    X.meteo.product.items = {'CAMELS-AUS v2 [daily]'};
+    X.meteo.product.default = 'CAMELS-AUS v2 [daily]';
     X.meteo.product.enabled = false;
     X.meteo.precipitation.items = { ...
         '1 SILO precipitation', ...
-        '2 AWAP precipitation' ...
+        '2 AGCD precipitation' ...
         };
     X.meteo.precipitation.default = '1 SILO precipitation';
     X.meteo.precipitation.enabled = true;
     X.meteo.temperature.items = { ...
         '1 Mean Tmin/Tmax (SILO)', ...
-        '2 Mean Tmin/Tmax (AWAP)' ...
+        '2 Mean Tmin/Tmax (AGCD)' ...
         };
     X.meteo.temperature.default = '1 Mean Tmin/Tmax (SILO)';
     X.meteo.temperature.enabled = true;
@@ -128,7 +128,7 @@ function S = local_meteo_schema()
     % Precipitation
     S.variables.P.files = { ...
         'precipitation/precipitation_SILO.csv', ...
-        'precipitation/precipitation_AWAP.csv'};
+        'precipitation/precipitation_AGCD.csv'};
     S.variables.P.selector = 'precip';
     S.variables.P.default = 1;
     S.variables.P.units = 'mm/day';
@@ -152,12 +152,12 @@ function S = local_meteo_schema()
     % Temperature
     S.variables.Tmin.files = { ...
         'temperature/tmin_SILO.csv', ...
-        'temperature/tmin_AWAP.csv'};
+        'temperature/tmin_AGCD.csv'};
     S.variables.Tmin.selector = 'temp';
     
     S.variables.Tmax.files = { ...
         'temperature/tmax_SILO.csv', ...
-        'temperature/tmax_AWAP.csv'};
+        'temperature/tmax_AGCD.csv'};
     S.variables.Tmax.selector = 'temp';
     
     % Native missing codes

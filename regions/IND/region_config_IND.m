@@ -17,9 +17,11 @@ function R = region_config_IND()
     X = struct();
     X.label = 'Daily';
     X.dt = 1;
-    X.basins.universe = 242;
+    % Universal inventory: every basin column in the distributed data.
+    % Period-specific discharge availability is handled by data screening.
+    X.basins.universe = 472;
     X.basins.training = 210;
-    X.basins.evaluation = 32;
+    X.basins.evaluation = 262;
     X.period.spinup_days = 365;
     X.period.manual.train_start = '01/10/2002';
     X.period.manual.train_end = '30/09/2012';
@@ -57,7 +59,7 @@ function R = region_config_IND()
     C(1).type = 'folder';
     C(1).path = fullfile('daily','catchment_mean_forcings');
     C(1).pattern = '*.csv';
-    C(1).minimum_count = 242;
+    C(1).minimum_count = 472;
     C(2).name = 'Discharge data';
     C(2).type = 'folder';
     C(2).path = fullfile('daily','streamflow_timeseries');

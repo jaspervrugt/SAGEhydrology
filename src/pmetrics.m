@@ -1,60 +1,33 @@
 function prf = pmetrics(bas,loss,L,met,i,prf)
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%PMETRICS Calculates basin-aggregated performance metrics during SAGE
-% descent and updates the performance-history structure using the compact
-% basin-wise metrics returned by CAMELS/CRR_MODEL.
+%PMETRICS Update SAGE performance histories.
 %
-% This function translates the raw basin-wise metric arrays in 'met' into
-% current basin-wise values in prf.curr and scalar iteration histories in
-% prf.iter.
-%
-% The notation used throughout is:
-%   tt = training basins | training period
-%   te = training basins | evaluation period/mask
-%   et = evaluation basins | training period
-%   ee = evaluation basins | evaluation period/mask
+%  Converts basin metrics and losses into scenario values and iteration
+%  summaries.
 %
 % SYNOPSIS:
-%  prf = pmetrics(bas,loss,L,met,i,prf)
+%   prf = pmetrics(bas,loss,L,met,i,prf)
 %
-%   bas         structure with basin information
-%    .K          total number of watersheds (= K_t + K_e)
-%    .K_t        number of training watersheds
-%    .K_e        number of evaluation watersheds
-%   loss        structure of loss function
-%    .fnc        scalar loss function
-%                 1 = sum of absolute residuals
-%                 2 = generalized least squares / residual sum of squares
-%                 3 = 1 - Nash-Sutcliffe efficiency
-%                 4 = 1 - Kling-Gupta efficiency
-%                 5 = Huber loss
-%                 6 = flow-duration-curve loss
-%                 7 = 1 - Jawad Kling-Gupta efficiency
-%    .n_win      for fnc = 7, moving-average window length in days
-%   L           1xK vector of basin-wise loss values returned by CAMELS
-%   met         basin-wise output returned by CAMELS for all K basins:
-%                .loss.t/.loss.e
-%                   SAR, GLS, Huber and RSS values
-%                .performance.t/.performance.e
-%                   NSE, KGE, D_fdc and JKGE values, plus the nested KGE
-%                   components r/alpha/beta and JKGE components M/V/C
-%   i           descent iteration counter
-%   prf         structure with performance histories
+% INPUT ARGUMENTS:
+%   bas             training and evaluation basin counts
+%    .K_t            number of training basins
+%    .K_e            number of evaluation basins
+%   loss            selected loss and observed variables
+%    .fnc            loss-function identifier
+%    .observed       names in a joint objective
+%   L               basin-wise objective values
+%   met             compact metrics returned by CAMELS
+%   i               current SAGE iteration
+%   prf             prior performance-history structure
 %
-% OUTPUT:
-%   prf         performance structure with two data lifetimes:
-%                .curr.NSE/KGE/S_fdc/JKGE
-%                   basin-wise values for the current iteration, organized
-%                   as .tt, .te, .et and .ee scenarios
-%                .iter
-%                   scalar histories stored across SAGE iterations
+% OUTPUT ARGUMENTS:
+%   prf             updated performance structure
+%    .curr           current basin-wise scenario metrics
+%    .iter           scalar metric and loss histories
 %
 % NOTES:
-%   1. The four explicit scenarios tt/te/et/ee are stored in 'prf'.
-%   2. No active-comparison aliases with suffix 'a' are used.
-%   3. Unavailable scenarios are returned as [] and stored as NaN in 'prf'.
-%   4. The integrated basin loss score is stored for NSE, KGE and S_fdc
-%      in prf.iter.Sib_NSE, prf.iter.Sib_KGE and prf.iter.Sib_S_fdc.
+%   Scenario suffixes tt, te, et, and ee denote training or evaluation
+%   basins crossed with training or evaluation periods.
 %
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % © Written by Jasper A. Vrugt, Dec. 2025 / updated Aug. 2026             %
@@ -64,6 +37,8 @@ function prf = pmetrics(bas,loss,L,met,i,prf)
     K_t = bas.K_t;
     K_e = bas.K_e;
     loss_fnc = loss.fnc;
+    names = local_observation_names(loss);
+    base = local_base_metrics(met,names,K);
     
     idx_t = 1:K_t;
     if K_e > 0
@@ -77,15 +52,19 @@ function prf = pmetrics(bas,loss,L,met,i,prf)
     % -----------------------------------------
     has = prf.has;
     
-    % ---------------------------------------------------------
+    % -------------------------------------------------------------
     % Build basin-wise performance for the current iteration.
     % These arrays are overwritten rather than stored by iteration.
-    % ---------------------------------------------------------
+    % -------------------------------------------------------------
     NSE = struct('tt',[],'te',[],'et',[],'ee',[]);
     KGE = struct('tt',[],'te',[],'et',[],'ee',[]);
     JKGE = struct('tt',[],'te',[],'et',[],'ee',[]);
     D_fdc = struct('tt',[],'te',[],'et',[],'ee',[]);
+    D_p = struct('tt',[],'te',[],'et',[],'ee',[]);
+    D_logp = struct('tt',[],'te',[],'et',[],'ee',[]);
     S_fdc = struct('tt',[],'te',[],'et',[],'ee',[]);
+    S_p = struct('tt',[],'te',[],'et',[],'ee',[]);
+    S_logp = struct('tt',[],'te',[],'et',[],'ee',[]);
     KGE.components = local_component_scenarios( ...
         {'r','alpha','beta'});
     JKGE.components = local_component_scenarios( ...
@@ -94,27 +73,31 @@ function prf = pmetrics(bas,loss,L,met,i,prf)
     % -----------------------------
     % Always-available scenario: tt
     % -----------------------------
-    NSE.tt = met.performance.t.NSE(idx_t).';
-    KGE.tt = met.performance.t.KGE(idx_t).';
-    JKGE.tt = met.performance.t.JKGE(idx_t).';
-    D_fdc.tt = met.performance.t.D_fdc(idx_t).';
+    NSE.tt = base.performance.t.NSE(idx_t).';
+    KGE.tt = base.performance.t.KGE(idx_t).';
+    JKGE.tt = base.performance.t.JKGE(idx_t).';
+    D_fdc.tt = base.performance.t.D_fdc(idx_t).';
+    D_p.tt = base.performance.t.D_p(idx_t).';
+    D_logp.tt = base.performance.t.D_logp(idx_t).';
     KGE.components.tt = local_kge_components( ...
-        met.performance.t,idx_t);
+        base.performance.t,idx_t);
     JKGE.components.tt = local_jkge_components( ...
-        met.performance.t,idx_t);
+        base.performance.t,idx_t);
     
     % ------------------------------------
     % Optional scenarios based on mdl.mode
     % ------------------------------------
     if has.te
-        NSE.te = met.performance.e.NSE(idx_t).';
-        KGE.te = met.performance.e.KGE(idx_t).';
-        JKGE.te = met.performance.e.JKGE(idx_t).';
-        D_fdc.te = met.performance.e.D_fdc(idx_t).';
+        NSE.te = base.performance.e.NSE(idx_t).';
+        KGE.te = base.performance.e.KGE(idx_t).';
+        JKGE.te = base.performance.e.JKGE(idx_t).';
+        D_fdc.te = base.performance.e.D_fdc(idx_t).';
+        D_p.te = base.performance.e.D_p(idx_t).';
+        D_logp.te = base.performance.e.D_logp(idx_t).';
         KGE.components.te = local_kge_components( ...
-            met.performance.e,idx_t);
+            base.performance.e,idx_t);
         JKGE.components.te = local_jkge_components( ...
-            met.performance.e,idx_t);
+            base.performance.e,idx_t);
     end
     
     if has.et
@@ -122,16 +105,20 @@ function prf = pmetrics(bas,loss,L,met,i,prf)
             NSE.et = [];
             KGE.et = [];
             D_fdc.et = [];
+            D_p.et = [];
+            D_logp.et = [];
             JKGE.et = [];
         else
-            NSE.et = met.performance.t.NSE(idx_e).';
-            KGE.et = met.performance.t.KGE(idx_e).';
-            JKGE.et = met.performance.t.JKGE(idx_e).';
-            D_fdc.et = met.performance.t.D_fdc(idx_e).';
+            NSE.et = base.performance.t.NSE(idx_e).';
+            KGE.et = base.performance.t.KGE(idx_e).';
+            JKGE.et = base.performance.t.JKGE(idx_e).';
+            D_fdc.et = base.performance.t.D_fdc(idx_e).';
+            D_p.et = base.performance.t.D_p(idx_e).';
+            D_logp.et = base.performance.t.D_logp(idx_e).';
             KGE.components.et = local_kge_components( ...
-                met.performance.t,idx_e);
+                base.performance.t,idx_e);
             JKGE.components.et = local_jkge_components( ...
-                met.performance.t,idx_e);
+                base.performance.t,idx_e);
         end
     end
     
@@ -140,16 +127,20 @@ function prf = pmetrics(bas,loss,L,met,i,prf)
             NSE.ee = [];
             KGE.ee = [];
             D_fdc.ee = [];
+            D_p.ee = [];
+            D_logp.ee = [];
             JKGE.ee = [];        
         else
-            NSE.ee = met.performance.e.NSE(idx_e).';
-            KGE.ee = met.performance.e.KGE(idx_e).';
-            JKGE.ee = met.performance.e.JKGE(idx_e).';
-            D_fdc.ee = met.performance.e.D_fdc(idx_e).';
+            NSE.ee = base.performance.e.NSE(idx_e).';
+            KGE.ee = base.performance.e.KGE(idx_e).';
+            JKGE.ee = base.performance.e.JKGE(idx_e).';
+            D_fdc.ee = base.performance.e.D_fdc(idx_e).';
+            D_p.ee = base.performance.e.D_p(idx_e).';
+            D_logp.ee = base.performance.e.D_logp(idx_e).';
             KGE.components.ee = local_kge_components( ...
-                met.performance.e,idx_e);
+                base.performance.e,idx_e);
             JKGE.components.ee = local_jkge_components( ...
-                met.performance.e,idx_e);
+                base.performance.e,idx_e);
         end
     end
     
@@ -159,11 +150,16 @@ function prf = pmetrics(bas,loss,L,met,i,prf)
     prf.iter.L.tt(i) = mean(L(idx_t),'omitnan');
     
     if has.te
-        prf.iter.L.te(i) = local_block_loss(loss_fnc, ...
-            met.loss.e.SAR(idx_t),met.loss.e.GLS(idx_t), ...
-            met.performance.e.NSE(idx_t),met.performance.e.KGE(idx_t), ...
-            met.loss.e.Huber(idx_t),met.performance.e.D_fdc(idx_t), ...
-            met.performance.e.JKGE(idx_t));
+        prf.iter.L.te(i) = local_block_loss(loss, ...
+            base.diagnostic.e.SAR(idx_t), ...
+            base.diagnostic.e.GLS(idx_t), ...
+            base.performance.e.NSE(idx_t), ...
+            base.performance.e.KGE(idx_t), ...
+            base.diagnostic.e.Huber(idx_t), ...
+            base.performance.e.D_fdc(idx_t), ...
+            base.performance.e.D_p(idx_t), ...
+            base.performance.e.D_logp(idx_t), ...
+            base.performance.e.JKGE(idx_t));
     else
         prf.iter.L.te(i) = NaN;
     end
@@ -178,11 +174,16 @@ function prf = pmetrics(bas,loss,L,met,i,prf)
     
     if has.ee ...
             && ~isempty(idx_e)
-        prf.iter.L.ee(i) = local_block_loss(loss_fnc, ...
-            met.loss.e.SAR(idx_e),met.loss.e.GLS(idx_e), ...
-            met.performance.e.NSE(idx_e),met.performance.e.KGE(idx_e), ...
-            met.loss.e.Huber(idx_e),met.performance.e.D_fdc(idx_e), ...
-            met.performance.e.JKGE(idx_e));
+        prf.iter.L.ee(i) = local_block_loss(loss, ...
+            base.diagnostic.e.SAR(idx_e), ...
+            base.diagnostic.e.GLS(idx_e), ...
+            base.performance.e.NSE(idx_e), ...
+            base.performance.e.KGE(idx_e), ...
+            base.diagnostic.e.Huber(idx_e), ...
+            base.performance.e.D_fdc(idx_e), ...
+            base.performance.e.D_p(idx_e), ...
+            base.performance.e.D_logp(idx_e), ...
+            base.performance.e.JKGE(idx_e));
     else
         prf.iter.L.ee(i) = NaN;
     end
@@ -190,39 +191,39 @@ function prf = pmetrics(bas,loss,L,met,i,prf)
     % ----------------
     % Aggregate totals
     % ----------------
-    prf.iter.SAR.tt(i) = mean(met.loss.t.SAR(idx_t), ...
+    prf.iter.SAR.tt(i) = mean(base.diagnostic.t.SAR(idx_t), ...
         'omitnan');
-    prf.iter.GLS.tt(i) = mean(met.loss.t.GLS(idx_t), ...
+    prf.iter.GLS.tt(i) = mean(base.diagnostic.t.GLS(idx_t), ...
         'omitnan');
-    prf.iter.RSS.tt(i) = mean(met.loss.t.RSS(idx_t), ...
-        'omitnan');
-    
-    prf.iter.NSE.tt(i) = mean(met.performance.t.NSE(idx_t), ...
-        'omitnan');
-    prf.iter.KGE.tt(i) = mean(met.performance.t.KGE(idx_t), ...
+    prf.iter.RSS.tt(i) = mean(base.diagnostic.t.RSS(idx_t), ...
         'omitnan');
     
-    prf.iter.Huber.tt(i) = mean(met.loss.t.Huber(idx_t), ...
+    prf.iter.NSE.tt(i) = mean(base.performance.t.NSE(idx_t), ...
         'omitnan');
-    prf.iter.JKGE.tt(i) = mean(met.performance.t.JKGE(idx_t), ...
+    prf.iter.KGE.tt(i) = mean(base.performance.t.KGE(idx_t), ...
+        'omitnan');
+    
+    prf.iter.Huber.tt(i) = mean(base.diagnostic.t.Huber(idx_t), ...
+        'omitnan');
+    prf.iter.JKGE.tt(i) = mean(base.performance.t.JKGE(idx_t), ...
         'omitnan');
     
     if has.te
-        prf.iter.SAR.te(i) = mean(met.loss.e.SAR(idx_t), ...
+        prf.iter.SAR.te(i) = mean(base.diagnostic.e.SAR(idx_t), ...
             'omitnan');
-        prf.iter.GLS.te(i) = mean(met.loss.e.GLS(idx_t), ...
+        prf.iter.GLS.te(i) = mean(base.diagnostic.e.GLS(idx_t), ...
             'omitnan');
-        prf.iter.RSS.te(i) = mean(met.loss.e.RSS(idx_t), ...
+        prf.iter.RSS.te(i) = mean(base.diagnostic.e.RSS(idx_t), ...
             'omitnan');
     
-        prf.iter.NSE.te(i) = mean(met.performance.e.NSE(idx_t), ...
+        prf.iter.NSE.te(i) = mean(base.performance.e.NSE(idx_t), ...
             'omitnan');
-        prf.iter.KGE.te(i) = mean(met.performance.e.KGE(idx_t), ...
+        prf.iter.KGE.te(i) = mean(base.performance.e.KGE(idx_t), ...
             'omitnan');
         
-        prf.iter.Huber.te(i) = mean(met.loss.e.Huber(idx_t), ...
+        prf.iter.Huber.te(i) = mean(base.diagnostic.e.Huber(idx_t), ...
             'omitnan');
-        prf.iter.JKGE.te(i) = mean(met.performance.e.JKGE(idx_t), ...
+        prf.iter.JKGE.te(i) = mean(base.performance.e.JKGE(idx_t), ...
             'omitnan');
     else
         prf.iter.SAR.te(i) = NaN;
@@ -236,21 +237,21 @@ function prf = pmetrics(bas,loss,L,met,i,prf)
     
     if has.et ...
             && ~isempty(idx_e)
-        prf.iter.SAR.et(i) = mean(met.loss.t.SAR(idx_e), ...
+        prf.iter.SAR.et(i) = mean(base.diagnostic.t.SAR(idx_e), ...
             'omitnan');
-        prf.iter.GLS.et(i) = mean(met.loss.t.GLS(idx_e), ...
+        prf.iter.GLS.et(i) = mean(base.diagnostic.t.GLS(idx_e), ...
             'omitnan');
-        prf.iter.RSS.et(i) = mean(met.loss.t.RSS(idx_e), ...
+        prf.iter.RSS.et(i) = mean(base.diagnostic.t.RSS(idx_e), ...
             'omitnan');
     
-        prf.iter.NSE.et(i) = mean(met.performance.t.NSE(idx_e), ...
+        prf.iter.NSE.et(i) = mean(base.performance.t.NSE(idx_e), ...
             'omitnan');
-        prf.iter.KGE.et(i) = mean(met.performance.t.KGE(idx_e), ...
+        prf.iter.KGE.et(i) = mean(base.performance.t.KGE(idx_e), ...
             'omitnan');
         
-        prf.iter.Huber.et(i) = mean(met.loss.t.Huber(idx_e), ...
+        prf.iter.Huber.et(i) = mean(base.diagnostic.t.Huber(idx_e), ...
             'omitnan');
-        prf.iter.JKGE.et(i) = mean(met.performance.t.JKGE(idx_e), ...
+        prf.iter.JKGE.et(i) = mean(base.performance.t.JKGE(idx_e), ...
             'omitnan');
     else
         prf.iter.SAR.et(i) = NaN;
@@ -266,21 +267,21 @@ function prf = pmetrics(bas,loss,L,met,i,prf)
     
     if has.ee ...
             && ~isempty(idx_e)
-        prf.iter.SAR.ee(i) = mean(met.loss.e.SAR(idx_e), ...
+        prf.iter.SAR.ee(i) = mean(base.diagnostic.e.SAR(idx_e), ...
             'omitnan');
-        prf.iter.GLS.ee(i) = mean(met.loss.e.GLS(idx_e), ...
+        prf.iter.GLS.ee(i) = mean(base.diagnostic.e.GLS(idx_e), ...
             'omitnan');
-        prf.iter.RSS.ee(i) = mean(met.loss.e.RSS(idx_e), ...
+        prf.iter.RSS.ee(i) = mean(base.diagnostic.e.RSS(idx_e), ...
             'omitnan');
     
-        prf.iter.NSE.ee(i) = mean(met.performance.e.NSE(idx_e), ...
+        prf.iter.NSE.ee(i) = mean(base.performance.e.NSE(idx_e), ...
             'omitnan');   
-        prf.iter.KGE.ee(i) = mean(met.performance.e.KGE(idx_e), ...
+        prf.iter.KGE.ee(i) = mean(base.performance.e.KGE(idx_e), ...
             'omitnan');   
     
-        prf.iter.Huber.ee(i) = mean(met.loss.e.Huber(idx_e), ...
+        prf.iter.Huber.ee(i) = mean(base.diagnostic.e.Huber(idx_e), ...
             'omitnan');
-        prf.iter.JKGE.ee(i) = mean(met.performance.e.JKGE(idx_e), ...
+        prf.iter.JKGE.ee(i) = mean(base.performance.e.JKGE(idx_e), ...
             'omitnan');   
     else
         prf.iter.SAR.ee(i) = NaN;
@@ -295,83 +296,181 @@ function prf = pmetrics(bas,loss,L,met,i,prf)
     end
     
     % ----------------------------------------------------------------------
-    % Basin- and period-specific dimensionless FDC skill score
+    % Basin- and period-specific dimensionless FDC skill scores
     % ----------------------------------------------------------------------
+    if local_has_observation(loss,"Q")
     if ~isfield(loss,'fdc') ...
             || ~isstruct(loss.fdc) ...
-            || ~isfield(loss.fdc,'D0t') ...
-            || ~isfield(loss.fdc,'D0e') ...
-            || numel(loss.fdc.D0t) ~= K ...
-            || numel(loss.fdc.D0e) ~= K
+            || ~isfield(loss.fdc,'Q') ...
+            || ~isstruct(loss.fdc.Q) ...
+            || ~isfield(loss.fdc.Q,'D0t') ...
+            || ~isfield(loss.fdc.Q,'D0e') ...
+            || ~isfield(loss.fdc.Q,'D0pt') ...
+            || ~isfield(loss.fdc.Q,'D0pe') ...
+            || ~isfield(loss.fdc.Q,'D0logpt') ...
+            || ~isfield(loss.fdc.Q,'D0logpe') ...
+            || numel(loss.fdc.Q.D0t) ~= K ...
+            || numel(loss.fdc.Q.D0e) ~= K ...
+            || numel(loss.fdc.Q.D0pt) ~= K ...
+            || numel(loss.fdc.Q.D0pe) ~= K ...
+            || numel(loss.fdc.Q.D0logpt) ~= K ...
+            || numel(loss.fdc.Q.D0logpe) ~= K
     
         error(['      Error:pmetrics: ' ...
-            'loss.fdc.D0t or loss.fdc.D0e is missing ' ...
+            'one or more FDC reference vectors are missing ' ...
             'or has incorrect size.']);
     end
     
-    D0t = double(loss.fdc.D0t(:));
-    D0e = double(loss.fdc.D0e(:));
+    D0t = double(loss.fdc.Q.D0t(:));
+    D0e = double(loss.fdc.Q.D0e(:));
+    D0pt = double(loss.fdc.Q.D0pt(:));
+    D0pe = double(loss.fdc.Q.D0pe(:));
+    D0logpt = double(loss.fdc.Q.D0logpt(:));
+    D0logpe = double(loss.fdc.Q.D0logpe(:));
     D0t_t = D0t(idx_t);
     D0e_t = D0e(idx_t);
+    D0pt_t = D0pt(idx_t);
+    D0pe_t = D0pe(idx_t);
+    D0logpt_t = D0logpt(idx_t);
+    D0logpe_t = D0logpe(idx_t);
     if ~isempty(idx_e)
         D0t_e = D0t(idx_e);
         D0e_e = D0e(idx_e);
+        D0pt_e = D0pt(idx_e);
+        D0pe_e = D0pe(idx_e);
+        D0logpt_e = D0logpt(idx_e);
+        D0logpe_e = D0logpe(idx_e);
     else
         D0t_e = [];
         D0e_e = [];
+        D0pt_e = [];
+        D0pe_e = [];
+        D0logpt_e = [];
+        D0logpe_e = [];
     end
     
     S_fdc.tt = local_fdc_score(D_fdc.tt,D0t_t);
+    S_p.tt = local_fdc_score(D_p.tt,D0pt_t);
+    S_logp.tt = local_fdc_score(D_logp.tt,D0logpt_t);
     if has.te
         S_fdc.te = local_fdc_score(D_fdc.te,D0e_t);
+        S_p.te = local_fdc_score(D_p.te,D0pe_t);
+        S_logp.te = local_fdc_score(D_logp.te,D0logpe_t);
     end
     if has.et ...
             && ~isempty(idx_e)
         S_fdc.et = local_fdc_score(D_fdc.et,D0t_e);
+        S_p.et = local_fdc_score(D_p.et,D0pt_e);
+        S_logp.et = local_fdc_score(D_logp.et,D0logpt_e);
     end
     if has.ee ...
             && ~isempty(idx_e)
         S_fdc.ee = local_fdc_score(D_fdc.ee,D0e_e);
+        S_p.ee = local_fdc_score(D_p.ee,D0pe_e);
+        S_logp.ee = local_fdc_score(D_logp.ee,D0logpe_e);
+    end
     end
     
     % -----------------
     % Summary histories
     % -----------------
+    % Support runs initialized before the S_ib,JKGE history was introduced.
+    % Preallocate with NaN so MATLAB does not backfill earlier iterations
+    % with misleading zeros when this field is first assigned mid-run.
+    if ~isfield(prf.iter,'Sib_JKGE')
+        prf.iter.Sib_JKGE = struct();
+        sibScenarios = {'tt','te','et','ee'};
+        for iScenario = 1:numel(sibScenarios)
+            scn = sibScenarios{iScenario};
+            prf.iter.Sib_JKGE.(scn) = ...
+                nan(size(prf.iter.mJKGE.(scn)));
+        end
+    end
+
     prf.iter.mNSE.tt(i) = local_median(NSE.tt);
     prf.iter.mKGE.tt(i) = local_median(KGE.tt);
     prf.iter.mJKGE.tt(i) = local_median(JKGE.tt);
     prf.iter.Sib_NSE.tt(i) = local_mean_one_minus(NSE.tt);
     prf.iter.Sib_KGE.tt(i) = local_mean_one_minus(KGE.tt);
+    if loss_fnc == 7
+        prf.iter.Sib_JKGE.tt(i) = local_mean_one_minus(JKGE.tt);
+    else
+        prf.iter.Sib_JKGE.tt(i) = NaN;
+    end
     prf.iter.Sib_S_fdc.tt(i) = local_mean_one_minus(S_fdc.tt);
     prf.iter.S_fdc.tt(i) = local_mean(S_fdc.tt);
     prf.iter.mS_fdc.tt(i) = local_median(S_fdc.tt);
+    prf.iter.Sib_S_p.tt(i) = local_mean_one_minus(S_p.tt);
+    prf.iter.S_p.tt(i) = local_mean(S_p.tt);
+    prf.iter.mS_p.tt(i) = local_median(S_p.tt);
+    prf.iter.Sib_S_logp.tt(i) = local_mean_one_minus(S_logp.tt);
+    prf.iter.S_logp.tt(i) = local_mean(S_logp.tt);
+    prf.iter.mS_logp.tt(i) = local_median(S_logp.tt);
     
     prf.iter.mNSE.te(i) = local_median(NSE.te);
     prf.iter.mKGE.te(i) = local_median(KGE.te);
     prf.iter.mJKGE.te(i) = local_median(JKGE.te);
     prf.iter.Sib_NSE.te(i) = local_mean_one_minus(NSE.te);
     prf.iter.Sib_KGE.te(i) = local_mean_one_minus(KGE.te);
+    if loss_fnc == 7
+        prf.iter.Sib_JKGE.te(i) = local_mean_one_minus(JKGE.te);
+    else
+        prf.iter.Sib_JKGE.te(i) = NaN;
+    end
     prf.iter.Sib_S_fdc.te(i) = local_mean_one_minus(S_fdc.te);
     prf.iter.S_fdc.te(i) = local_mean(S_fdc.te);
     prf.iter.mS_fdc.te(i) = local_median(S_fdc.te);
+    prf.iter.Sib_S_p.te(i) = local_mean_one_minus(S_p.te);
+    prf.iter.S_p.te(i) = local_mean(S_p.te);
+    prf.iter.mS_p.te(i) = local_median(S_p.te);
+    prf.iter.Sib_S_logp.te(i) = local_mean_one_minus(S_logp.te);
+    prf.iter.S_logp.te(i) = local_mean(S_logp.te);
+    prf.iter.mS_logp.te(i) = local_median(S_logp.te);
     
     prf.iter.mNSE.et(i) = local_median(NSE.et);
     prf.iter.mKGE.et(i) = local_median(KGE.et);
     prf.iter.mJKGE.et(i) = local_median(JKGE.et);
     prf.iter.Sib_NSE.et(i) = local_mean_one_minus(NSE.et);
     prf.iter.Sib_KGE.et(i) = local_mean_one_minus(KGE.et);
+    if loss_fnc == 7
+        prf.iter.Sib_JKGE.et(i) = local_mean_one_minus(JKGE.et);
+    else
+        prf.iter.Sib_JKGE.et(i) = NaN;
+    end
     prf.iter.Sib_S_fdc.et(i) = local_mean_one_minus(S_fdc.et);
     prf.iter.S_fdc.et(i) = local_mean(S_fdc.et);
     prf.iter.mS_fdc.et(i) = local_median(S_fdc.et);
+    prf.iter.Sib_S_p.et(i) = local_mean_one_minus(S_p.et);
+    prf.iter.S_p.et(i) = local_mean(S_p.et);
+    prf.iter.mS_p.et(i) = local_median(S_p.et);
+    prf.iter.Sib_S_logp.et(i) = local_mean_one_minus(S_logp.et);
+    prf.iter.S_logp.et(i) = local_mean(S_logp.et);
+    prf.iter.mS_logp.et(i) = local_median(S_logp.et);
     
     prf.iter.mNSE.ee(i) = local_median(NSE.ee);
     prf.iter.mKGE.ee(i) = local_median(KGE.ee);
     prf.iter.mJKGE.ee(i) = local_median(JKGE.ee);
     prf.iter.Sib_NSE.ee(i) = local_mean_one_minus(NSE.ee);
     prf.iter.Sib_KGE.ee(i) = local_mean_one_minus(KGE.ee);
+    if loss_fnc == 7
+        prf.iter.Sib_JKGE.ee(i) = local_mean_one_minus(JKGE.ee);
+    else
+        prf.iter.Sib_JKGE.ee(i) = NaN;
+    end
     prf.iter.Sib_S_fdc.ee(i) = local_mean_one_minus(S_fdc.ee);
     prf.iter.S_fdc.ee(i) = local_mean(S_fdc.ee);
     prf.iter.mS_fdc.ee(i) = local_median(S_fdc.ee);
+    prf.iter.Sib_S_p.ee(i) = local_mean_one_minus(S_p.ee);
+    prf.iter.S_p.ee(i) = local_mean(S_p.ee);
+    prf.iter.mS_p.ee(i) = local_median(S_p.ee);
+    prf.iter.Sib_S_logp.ee(i) = local_mean_one_minus(S_logp.ee);
+    prf.iter.S_logp.ee(i) = local_mean(S_logp.ee);
+    prf.iter.mS_logp.ee(i) = local_median(S_logp.ee);
+
+    if isfield(met,'total')
+        prf = local_joint_histories( ...
+            prf,met,loss,i,idx_t,idx_e,has);
+    end
     
     % -------------------------------------------------------
     % Regional KGE and JKGE component histories per scenario
@@ -402,8 +501,180 @@ function prf = pmetrics(bas,loss,L,met,i,prf)
     prf.curr.NSE = NSE;
     prf.curr.KGE = KGE;
     prf.curr.S_fdc = S_fdc;
+    prf.curr.S_p = S_p;
+    prf.curr.S_logp = S_logp;
     prf.curr.JKGE = JKGE;
+    prf.curr.loss_fnc = loss_fnc;
+    prf.curr.fdc_formulation = local_fdc_formulation(loss);
+    % Named-observation current values are populated by
+    % local_joint_histories for exactly the selected variables.
 
+end
+
+function names = local_observation_names(loss)
+%LOCAL_OBSERVATION_NAMES Return normalized requested observation names.
+
+    names = "Q";
+    if isfield(loss,'observed') && ~isempty(loss.observed)
+        names = unique(upper(strtrim( ...
+            string(loss.observed(:)))),'stable');
+        names = names(strlength(names) > 0);
+    end
+end
+
+function base = local_base_metrics(met,names,K)
+%LOCAL_BASE_METRICS Select data for the original single-variable reports.
+
+    if isfield(met.variable,'Q')
+        base = met.variable.Q;
+    else
+        base = met.variable.(char(names(1)));
+    end
+    if ~isfield(base,'diagnostic')
+        z = nan(1,K);
+        block = struct('SAR',z,'GLS',z,'Huber',z,'RSS',z);
+        base.diagnostic = struct('t',block,'e',block);
+    end
+    periods = {'t','e'};
+    for j = 1:2
+        per = periods{j};
+        P = base.performance.(per);
+        if ~isfield(P,'KGE_components')
+            z = nan(1,K);
+            P.KGE_components = struct( ...
+                'r',z,'alpha',z,'beta',z);
+        end
+        base.performance.(per) = P;
+    end
+end
+
+function tf = local_has_observation(loss,name)
+%LOCAL_HAS_OBSERVATION Test whether a variable is a training objective.
+
+    names = "Q";
+    if isfield(loss,'observed') ...
+            && ~isempty(loss.observed)
+        names = unique(upper(strtrim( ...
+            string(loss.observed(:)))),'stable');
+        names = names(strlength(names) > 0);
+    end
+    tf = any(names == upper(string(name)));
+end
+
+function prf = local_joint_histories( ...
+    prf,met,loss,i,idx_t,idx_e,has)
+%LOCAL_JOINT_HISTORIES Retain joint losses and per-observation diagnostics.
+
+    names = local_observation_names(loss);
+    scenarios = {'tt','te','et','ee'};
+    periods = {'t','e','t','e'};
+    indices = {idx_t,idx_t,idx_e,idx_e};
+    enabled = [true,has.te,has.et,has.ee];
+    formulation = local_fdc_formulation(loss);
+
+    dFields = {'D_fdc','D_p','D_logp'};
+    d0Train = {'D0t','D0pt','D0logpt'};
+    d0Eval = {'D0e','D0pe','D0logpe'};
+
+    for j = 1:4
+        sc = scenarios{j};
+        per = periods{j};
+        id = indices{j};
+        if ~enabled(j) ...
+                || isempty(id)
+            prf = local_store_empty_joint(prf,sc,i,names);
+            continue
+        end
+
+        prf.iter.joint.loss.total.(sc)(i) = ...
+            local_sum(met.total.loss.(per)(id));
+        for k = 1:numel(names)
+            name = char(names(k));
+            prf.iter.joint.loss.(name).(sc)(i) = ...
+                local_sum(met.variable.(name).loss.(per)(id));
+            prf.iter.joint.contribution.(name).(sc)(i) = ...
+                local_sum(met.total.contribution. ...
+                (per).(name)(id));
+
+            S = met.variable.(name).performance.(per);
+            prf.curr.joint.(name).NSE.(sc) = S.NSE(id).';
+            prf.curr.joint.(name).KGE.(sc) = S.KGE(id).';
+            components = {'r','alpha','beta'};
+            for c = 1:numel(components)
+                component = components{c};
+                values = S.KGE_components.(component)(id);
+                prf.curr.joint.(name).KGE_components. ...
+                    (component).(sc) = values.';
+                prf.iter.joint.(name).KGE_components. ...
+                    (component).(sc)(i) = local_median(values);
+            end
+            prf.curr.joint.(name).JKGE.(sc) = S.JKGE(id).';
+            prf.iter.joint.(name).NSE.(sc)(i) = ...
+                local_median(S.NSE(id));
+            prf.iter.joint.(name).KGE.(sc)(i) = ...
+                local_median(S.KGE(id));
+            prf.iter.joint.(name).JKGE.(sc)(i) = ...
+                local_median(S.JKGE(id));
+            components = {'M','V','C'};
+            for c = 1:numel(components)
+                component = components{c};
+                values = S.JKGE_components.(component)(id);
+                prf.iter.joint.(name).JKGE_components. ...
+                    (component).(sc)(i) = local_median(values);
+            end
+
+            D = S.(dFields{formulation})(id).';
+            score = nan(size(D));
+            if isfield(loss,'fdc') ...
+                    && isfield(loss.fdc,name)
+                refs = loss.fdc.(name);
+                if per == 't'
+                    refField = d0Train{formulation};
+                else
+                    refField = d0Eval{formulation};
+                end
+                if isfield(refs,refField) ...
+                        && numel(refs.(refField)) >= max(id)
+                    D0 = double(refs.(refField)(id));
+                    score = local_fdc_score(D,D0);
+                end
+            end
+            prf.iter.joint.(name).duration.(sc)(i) = ...
+                local_median(score);
+        end
+    end
+end
+
+function prf = local_store_empty_joint(prf,sc,i,names)
+%LOCAL_STORE_EMPTY_JOINT Store unavailable joint scenario values.
+
+    prf.iter.joint.loss.total.(sc)(i) = NaN;
+    for k = 1:numel(names)
+        name = char(names(k));
+        prf.iter.joint.loss.(name).(sc)(i) = NaN;
+        prf.iter.joint.contribution.(name).(sc)(i) = NaN;
+        prf.iter.joint.(name).NSE.(sc)(i) = NaN;
+        prf.iter.joint.(name).KGE.(sc)(i) = NaN;
+        components = {'r','alpha','beta'};
+        for c = 1:numel(components)
+            component = components{c};
+            prf.iter.joint.(name).KGE_components. ...
+                (component).(sc)(i) = NaN;
+            prf.curr.joint.(name).KGE_components. ...
+                (component).(sc) = [];
+        end
+        prf.iter.joint.(name).JKGE.(sc)(i) = NaN;
+        components = {'M','V','C'};
+        for c = 1:numel(components)
+            component = components{c};
+            prf.iter.joint.(name).JKGE_components. ...
+                (component).(sc)(i) = NaN;
+        end
+        prf.iter.joint.(name).duration.(sc)(i) = NaN;
+        prf.curr.joint.(name).NSE.(sc) = [];
+        prf.curr.joint.(name).KGE.(sc) = [];
+        prf.curr.joint.(name).JKGE.(sc) = [];
+    end
 end
 
 function S = local_component_scenarios(names)
@@ -433,9 +704,11 @@ function C = local_jkge_components(P,idx)
         'C',P.JKGE_components.C(idx).');
 end
 
-function Lblk = local_block_loss(loss_fnc, ...
-    SAR,GLS,NSE,KGE,Huber,D_fdc,JKGE)
+function Lblk = local_block_loss(loss, ...
+    SAR,GLS,NSE,KGE,Huber,D_fdc,D_p,D_logp,JKGE)
 %LOCAL_BLOCK_LOSS Basin-aggregated loss over one scenario block.
+
+    loss_fnc = loss.fnc;
 
     if isempty(SAR) ...
             && isempty(GLS) ...
@@ -443,6 +716,8 @@ function Lblk = local_block_loss(loss_fnc, ...
             && isempty(KGE) ...
             && isempty(Huber) ...
             && isempty(D_fdc) ...
+            && isempty(D_p) ...
+            && isempty(D_logp) ...
             && isempty(JKGE)
         Lblk = NaN;
         return
@@ -460,13 +735,38 @@ function Lblk = local_block_loss(loss_fnc, ...
         case 5
             Lblk = mean(Huber,'omitnan');
         case 6
-            Lblk = mean(D_fdc,'omitnan');
+            switch local_fdc_formulation(loss)
+                case 1
+                    Lblk = mean(D_fdc,'omitnan');
+                case 2
+                    Lblk = mean(D_p,'omitnan');
+                case 3
+                    Lblk = mean(D_logp,'omitnan');
+            end
         case 7
             Lblk = mean(1 - JKGE,'omitnan');
         otherwise
             error(['      Error:pmetrics: ' ...
                 'Unknown loss choice loss = %g.'], ...
                 loss_fnc);
+    end
+end
+
+function formulation = local_fdc_formulation(loss)
+%LOCAL_FDC_FORMULATION Return the selected 6a/6b/6c formulation.
+    formulation = 1;
+    if isfield(loss,'fdc') ...
+            && isstruct(loss.fdc) ...
+            && isfield(loss.fdc,'formulation') ...
+            && ~isempty(loss.fdc.formulation)
+        formulation = double(loss.fdc.formulation);
+    end
+    if ~isscalar(formulation) ...
+            || ~isfinite(formulation) ...
+            || ~ismember(formulation,1:3)
+        error('pmetrics:BadFDCFormulation', ...
+            ['loss.fdc.formulation must be 1 (d_fdc), 2 (d_p), ' ...
+             'or 3 (d_logp).']);
     end
 end
 
@@ -494,6 +794,16 @@ function m = local_mean(x)
         m = NaN;
     else
         m = mean(x,'omitnan');
+    end
+end
+
+function s = local_sum(x)
+%LOCAL_SUM Sum finite values with empty/all-missing protection.
+    if isempty(x) ...
+            || ~any(isfinite(x))
+        s = NaN;
+    else
+        s = sum(x,'omitnan');
     end
 end
 
