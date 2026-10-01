@@ -4,7 +4,10 @@ Sensitivity-Aware Gradient Estimation (SAGE) is a framework for scalable,
 attribute-conditioned training of conceptual hydrologic models using analytic
 forward sensitivities.
 
-[![SAGE graphical interface and completed hourly hydrologic-model training run](docs/images/sage-notes-run-summary.png)](docs/images/sage-notes-run-summary.png)
+<p align="center">
+  <a href="docs/images/sage-notes-run-summary.png"><img src="docs/images/sage-notes-run-summary.png" alt="SAGE graphical interface and completed hourly hydrologic-model training run" width="900"></a><br>
+  <em>Figure 1. SAGE Notes workspace and summary of a completed hydrologic-model training run.</em>
+</p>
 
 This repository contains the public computational source for SAGEhydrology.
 The graphical user interface is distributed as a compiled application through
@@ -16,7 +19,10 @@ supported regional hydrologic and meteorological datasets. Users therefore do
 not need to locate and arrange these data files manually for the standard
 regional workflows.
 
-[![SAGE data-quality screening and regional coverage](docs/images/sage-data-quality-regional-coverage.png)](docs/images/sage-data-quality-regional-coverage.png)
+<p align="center">
+  <a href="docs/images/sage-data-quality-regional-coverage.png"><img src="docs/images/sage-data-quality-regional-coverage.png" alt="SAGE data-quality screening and regional coverage" width="900"></a><br>
+  <em>Figure 2. Regional data-quality screening, training/evaluation counts, and hydroclimatic coverage.</em>
+</p>
 
 ## Repository contents
 
@@ -51,7 +57,10 @@ applies the directory and naming conventions expected by SAGE, and prepares
 the data for basin selection and quality screening. Manual data installation
 remains available for users who already maintain local dataset copies.
 
-[![SAGE regional data installation and training/evaluation basin selection](docs/images/sage-data-installation-basin-map.png)](docs/images/sage-data-installation-basin-map.png)
+<p align="center">
+  <a href="docs/images/sage-data-installation-basin-map.png"><img src="docs/images/sage-data-installation-basin-map.png" alt="SAGE regional data installation and training/evaluation basin selection" width="900"></a><br>
+  <em>Figure 3. Regional data installation and spatial selection of training and evaluation basins.</em>
+</p>
 
 ### MATLAB source
 
@@ -74,7 +83,10 @@ postprocessing tools. This makes it straightforward to inspect intermediate
 results, customize analyses and figures, or reproduce and extend a run
 programmatically.
 
-[![SAGE-generated MATLAB export containing a reproducible training configuration](docs/images/sage-matlab-export-script.png)](docs/images/sage-matlab-export-script.png)
+<p align="center">
+  <a href="docs/images/sage-matlab-export-script.png"><img src="docs/images/sage-matlab-export-script.png" alt="SAGE-generated MATLAB export containing a reproducible training configuration" width="900"></a><br>
+  <em>Figure 4. MATLAB script exported by SAGE with the validated configuration required for reproducible source-based execution.</em>
+</p>
 
 The software does not bundle or redistribute CAMELS and other regional
 datasets inside the source repository or application installer. Instead, the
