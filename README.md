@@ -63,6 +63,17 @@ remains available for users who already maintain local dataset copies.
 4. Compile platform-specific MEX kernels when required by the selected model
    and execution backend.
 
+Pressing **Export script** in the SAGE GUI creates `run_SAGE_export.m`, a
+stand-alone MATLAB script containing the complete validated configuration of
+the current GUI experiment. Users can run this script directly in MATLAB as
+an alternative to starting the run from the graphical interface. The GUI
+provides live monitoring and interactive result tabs; the exported script
+runs the same computational workflow from source and gives immediate access
+to its MATLAB workspace variables, source functions, plotting routines, and
+postprocessing tools. This makes it straightforward to inspect intermediate
+results, customize analyses and figures, or reproduce and extend a run
+programmatically.
+
 [![SAGE-generated MATLAB export containing a reproducible training configuration](docs/images/sage-matlab-export-script.png)](docs/images/sage-matlab-export-script.png)
 
 The software does not bundle or redistribute CAMELS and other regional
