@@ -4,6 +4,8 @@ Sensitivity-Aware Gradient Estimation (SAGE) is a framework for scalable,
 attribute-conditioned training of conceptual hydrologic models using analytic
 forward sensitivities.
 
+[![SAGE graphical interface: notes and completed-run summary](docs/images/sage-notes-run-summary.png)](docs/images/sage-notes-run-summary.png)
+
 This repository contains the public computational source for SAGEhydrology.
 The graphical user interface is distributed as a compiled application through
 the [GitHub Releases](https://github.com/jaspervrugt/SAGEhydrology/releases)
@@ -13,6 +15,8 @@ The SAGE GUI can automatically download, extract, organize, and register the
 supported regional hydrologic and meteorological datasets. Users therefore do
 not need to locate and arrange these data files manually for the standard
 regional workflows.
+
+[![SAGE data-quality screening and regional coverage](docs/images/sage-data-quality-regional-coverage.png)](docs/images/sage-data-quality-regional-coverage.png)
 
 ## Repository contents
 
