@@ -59,7 +59,7 @@ remains available for users who already maintain local dataset copies.
 
 <p align="center">
   <a href="docs/images/sage-data-installation-basin-map.png"><img src="docs/images/sage-data-installation-basin-map.png" alt="SAGE regional data installation and training/evaluation basin selection" width="900"></a><br>
-  <em>Figure 3. Regional data installation and spatial selection of training and evaluation basins.</em>
+  <em>Figure 3. Left: Region tab for selecting the United States and the CAMELS-US, CAMELS-H-US, or MACH-US dataset, with controls for installing the available data; CAMELS-US supports daily and hourly resolution, and Run Notes report the outcome of data-quality screening. Right: live training progress showing the loss function, median NSE, KGE, and S<sub>fdc</sub>, and integrated basin scores as functions of SAGE iteration.</em>
 </p>
 
 ### MATLAB source
