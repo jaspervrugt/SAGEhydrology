@@ -4,7 +4,7 @@ Sensitivity-Aware Gradient Estimation (SAGE) is a framework for scalable,
 attribute-conditioned training of conceptual hydrologic models using analytic
 forward sensitivities.
 
-[![SAGE graphical interface: notes and completed-run summary](docs/images/sage-notes-run-summary.png)](docs/images/sage-notes-run-summary.png)
+[![SAGE graphical interface and completed hourly hydrologic-model training run](docs/images/sage-notes-run-summary.png)](docs/images/sage-notes-run-summary.png)
 
 This repository contains the public computational source for SAGEhydrology.
 The graphical user interface is distributed as a compiled application through
@@ -51,6 +51,8 @@ applies the directory and naming conventions expected by SAGE, and prepares
 the data for basin selection and quality screening. Manual data installation
 remains available for users who already maintain local dataset copies.
 
+[![SAGE regional data installation and training/evaluation basin selection](docs/images/sage-data-installation-basin-map.png)](docs/images/sage-data-installation-basin-map.png)
+
 ### MATLAB source
 
 1. Clone or download this repository.
@@ -60,6 +62,8 @@ remains available for users who already maintain local dataset copies.
    the configuration before running it.
 4. Compile platform-specific MEX kernels when required by the selected model
    and execution backend.
+
+[![SAGE-generated MATLAB export containing a reproducible training configuration](docs/images/sage-matlab-export-script.png)](docs/images/sage-matlab-export-script.png)
 
 The software does not bundle or redistribute CAMELS and other regional
 datasets inside the source repository or application installer. Instead, the
