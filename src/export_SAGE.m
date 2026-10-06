@@ -1,4 +1,4 @@
-function file_mat = export_SAGE(mdl,dat,bas,prd,dirres,Q,prf,region,nTheta)
+function file_mat = export_SAGE(mdl,dat,bas,prd,dirres,Q,prf,region,nTheta,varargin)
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %EXPORT_SAGE Export final SAGE results to a MAT file.
 %
@@ -197,6 +197,9 @@ function file_mat = export_SAGE(mdl,dat,bas,prd,dirres,Q,prf,region,nTheta)
     file_mat = fullfile(dirres, ...
         local_export_filename(mdl, ...
         prd,region));
+    if ~isempty(varargin)
+        E.figure_inputs = varargin{1};
+    end
     save(file_mat,'E','-v7.3');
 
 end

@@ -65,9 +65,11 @@ function write_header(mdl,part,details)
 
     labelWidth = max(15,max(cellfun( ...
         @(x) numel(char(string(x))),rows(:,1))));
-    lines = local_format_rows(rows,labelWidth,76);
+    % Keep the timestamped GUI banner compact on smaller screens. Metadata
+    % wraps within the fixed box instead of expanding it for long values.
+    w = 60;
+    lines = local_format_rows(rows,labelWidth,w-4);
     subtitle = 'Process-Based Hydrologic Models across Large Basin Samples';
-    w = max([43,max(cellfun(@numel,lines)) + 4,numel(subtitle) + 2]);
     indent = '           ';
     % W is the width between the two vertical box edges.  The corner and
     % separator characters replace those edges; they must not add another
@@ -100,7 +102,7 @@ function lines = local_format_rows(rows,labelWidth,maxWidth)
 %LOCAL_FORMAT_ROWS Format and wrap metadata without widening the banner.
 
     lines = cell(0,1);
-    valueWidth = max(24,maxWidth-labelWidth-3);
+    valueWidth = max(1,maxWidth-labelWidth-3);
     for k = 1:size(rows,1)
         label = char(string(rows{k,1}));
         wrapped = local_wrap_text(char(string(rows{k,2})),valueWidth);
@@ -128,6 +130,17 @@ function lines = local_wrap_text(text,width)
     current = '';
     for k = 1:numel(words)
         word = words{k};
+        % Long dataset identifiers must not push the right border outward.
+        if numel(word) > width
+            if ~isempty(current)
+                lines{end+1,1} = current; %#ok<AGROW>
+                current = '';
+            end
+            while numel(word) > width
+                lines{end+1,1} = word(1:width); %#ok<AGROW>
+                word = word(width+1:end);
+            end
+        end
         if isempty(current)
             candidate = word;
         else

@@ -855,6 +855,20 @@ function varargout = camels(nTheta,mdl,dat,bas,ode,loss,misc,d,i,dirres)
             obs_keep{j} = ObsTmp{keep_idx(j)};
         end
         Qfdc.observations = obs_keep;
+        % Retain each basin's split explicitly for rainfall-block exports.
+        for tagCell = {'tt','te','et','ee'}
+            tag = tagCell{1};
+            Qfdc.idx.(tag) = cell(1,nq);
+            for j = 1:nq
+                kk = keep_idx(j);
+                if ismember(tag,{'tt','et'}), key='id_train'; else, key='id_eval'; end
+                if isfield(dat{kk},key)
+                    Qfdc.idx.(tag){j} = dat{kk}.(key);
+                elseif isfield(mdl,key)
+                    Qfdc.idx.(tag){j} = mdl.(key);
+                end
+            end
+        end
         Qfdc.observation_names = cellstr( ...
             local_observation_names(loss));
     end

@@ -810,100 +810,10 @@ function frmt = local_print_joint_stats( ...
     names = unique(upper(strtrim( ...
         string(loss.observed(:)))),'stable');
     names = names(strlength(names) > 0);
-    if ~isequal(names(:),["Q";"SWE"])
-        frmt = local_print_named_stats( ...
-            scens,prf,i,l,loss,fdcFormulation,fid,names);
-        return
-    end
-
-    durationQ = 'S_fdc';
-    durationSWE = 'S_sdc';
-    if fdcFormulation == 2
-        durationQ = 'S_p';
-        durationSWE = 'S_p';
-    elseif fdcFormulation == 3
-        durationQ = 'S_logp';
-        durationSWE = 'S_logp';
-    end
-
-    cpuT = prf.iter.cpuT(i);
-    printHeader = i == 1 || mod(i-1,25) == 0;
-    J = prf.iter.joint;
-    values = nan(numel(scens),9);
-    for j = 1:numel(scens)
-        sc = scens{j};
-        values(j,:) = [J.loss.total.(sc)(i), ...
-            J.loss.Q.(sc)(i), ...
-            J.loss.SWE.(sc)(i), ...
-            J.Q.NSE.(sc)(i),J.Q.KGE.(sc)(i), ...
-            J.Q.duration.(sc)(i), ...
-            J.SWE.NSE.(sc)(i),J.SWE.KGE.(sc)(i), ...
-            J.SWE.duration.(sc)(i)];
-    end
-
-    persistent qPow qScale swePow sweScale
-    if isempty(qPow)
-        [qPow,qScale,swePow,sweScale] = deal(0,1,0,1);
-    end
-    if printHeader
-        [qPow,qScale] = local_joint_scale(values(:,2));
-        [swePow,sweScale] = local_joint_scale(values(:,3));
-    end
-    scaledQ = values(:,2)/qScale;
-    scaledSWE = values(:,3)/sweScale;
-
-    if printHeader
-        [cQ,cSWE,wQ,wSWE,sQ,sSWE] = ...
-            local_joint_coefficients(loss);
-        lossName = local_joint_loss_name(loss.fnc,fdcFormulation);
-        names = upper(strtrim(string(loss.observed(:))));
-        names = names(strlength(names) > 0);
-        dataLine = sprintf(['data types: {%s}, loss functions: ' ...
-            '%s (loss = %d)\n'], ...
-            strjoin(cellstr(names),','),lossName,loss.fnc);
-        formula = sprintf(['total loss: L_tot = c_Q x %s^Q + ' ...
-            'c_SWE x %s^SWE\n'],lossName,lossName);
-        whereQ = sprintf(['where: c_Q = w_Q/s_Q = %.4g/%.7g ' ...
-            '= %.4g\n'],wQ,sQ,cQ);
-        whereSWE = sprintf(['       c_SWE = w_SWE/s_SWE = ' ...
-            '%.4g/%.4g = %.4g\n\n'],wSWE,sSWE,cSWE);
-        group = sprintf(['            L_tot  |  %s^Q  %s^SWE  ' ...
-            '|---------- Q --------|  |-------- SWE --------|\n'], ...
-            lossName,lossName);
-        header = sprintf(['scen               |   x10^%d   x10^%d     ' ...
-            'nse     kge   %6s     nse     kge   %6s\n'], ...
-            qPow,swePow,durationQ,durationSWE);
-        tableSep = repmat('-',1,numel(header));
-        % Use the table's computed width above and below the block.  A
-        % former fixed 105-character upper rule extended beyond the final
-        % SWE column for two-observation runs.
-        lead = sprintf(['\n%s\nit %4d   l %5d   ' ...
-            'CPU %5.1f s\n'],tableSep,i,l,cpuT);
-        block = [lead dataLine formula whereQ whereSWE ...
-            group header tableSep newline];
-        fprintf('%s',block);
-        fprintf(fid,'%s',block);
-    else
-        lead = sprintf(['\nit %4d   l %5d   ' ...
-            'CPU %5.1f s\n'],i,l,cpuT);
-        fprintf('%s',lead);
-        fprintf(fid,'%s',lead);
-    end
-
-    for j = 1:numel(scens)
-        sc = scens{j};
-        totalText = local_joint_total(values(j,1));
-        row = sprintf(['%-6s %10s  | %6.3f   %6.3f   ' ...
-            '%7.3f %7.3f %7.3f  ' ...
-            '%7.3f %7.3f %7.3f\n'], ...
-            sc,totalText,scaledQ(j),scaledSWE(j), ...
-            values(j,4:9));
-        fprintf('%s',row);
-        fprintf(fid,'%s',row);
-    end
-    frmt = '';
+    % All named-observation combinations share the compact grouped table.
+    frmt = local_print_named_stats( ...
+        scens,prf,i,l,loss,fdcFormulation,fid,names);
 end
-
 function frmt = local_print_named_stats( ...
     scens,prf,i,l,loss,fdcFormulation,fid,names)
 %LOCAL_PRINT_NAMED_STATS Print an arbitrary named-observation objective.
@@ -912,6 +822,19 @@ function frmt = local_print_named_stats( ...
     cpuT = prf.iter.cpuT(i);
     printHeader = i == 1 || mod(i-1,25) == 0;
     lossName = local_joint_loss_name(loss.fnc,fdcFormulation);
+    header = sprintf('%-4s %8s','scen','L_tot');
+    group = repmat(' ',1,numel(header));
+    for k = 1:numel(names)
+        name = char(names(k));
+        columns = sprintf('%7s %7s %7s %7s','L','NSE','KGE','JKGE');
+        pad = numel(columns)-numel(name)-2;
+        left = floor(pad/2);
+        heading = [repmat('-',1,left) ' ' name ' ' ...
+            repmat('-',1,pad-left)];
+        group = [group '   ' heading]; %#ok<AGROW>
+        header = [header ' | ' columns]; %#ok<AGROW>
+    end
+    tableSep = repmat('-',1,numel(header));
     if printHeader
         dataLine = sprintf(['data types: {%s}, loss function: ' ...
             '%s (loss = %d)\n'],strjoin(cellstr(names),','), ...
@@ -932,22 +855,14 @@ function frmt = local_print_named_stats( ...
             dataLine = [dataLine detail]; %#ok<AGROW>
         end
         formula = [formula newline];
-        header = sprintf('%-6s %11s','scen','L_tot');
-        for k = 1:numel(names)
-            name = char(names(k));
-            header = [header sprintf([' | %11s %8s ' ...
-                '%8s %8s'],['L_' name],['NSE_' name], ...
-                ['KGE_' name],['JKGE_' name])]; %#ok<AGROW>
-        end
-        tableSep = repmat('-',1,numel(header));
-        lead = sprintf(['\n%s\nit %4d   l %5d   ' ...
-            'CPU %5.1f s\n'],tableSep,i,l,cpuT);
-        block = [lead dataLine formula header newline ...
+        lead = sprintf('it %4d   l %5d   CPU %5.1f s\n',i,l,cpuT);
+        block = [newline tableSep newline dataLine formula ...
+            tableSep newline lead group newline header newline ...
             tableSep newline];
         fprintf('%s',block);
         fprintf(fid,'%s',block);
     else
-        lead = sprintf(['\nit %4d   l %5d   ' ...
+        lead = sprintf(['it %4d   l %5d   ' ...
             'CPU %5.1f s\n'],i,l,cpuT);
         fprintf('%s',lead);
         fprintf(fid,'%s',lead);
@@ -955,21 +870,44 @@ function frmt = local_print_named_stats( ...
 
     for j = 1:numel(scens)
         sc = scens{j};
-        row = sprintf('%-6s %11s',sc,local_joint_total( ...
-            J.loss.total.(sc)(i)));
+        total = local_compact_joint_number(J.loss.total.(sc)(i),8,true);
+        row = sprintf('%-4s %8s',sc,total);
         for k = 1:numel(names)
             name = char(names(k));
-            row = [row sprintf(' | %11.4g %8.3f %8.3f %8.3f', ...
-                J.loss.(name).(sc)(i), ...
-                J.(name).NSE.(sc)(i), ...
-                J.(name).KGE.(sc)(i), ...
-                J.(name).JKGE.(sc)(i))]; %#ok<AGROW>
+            component = sprintf('%.4g',J.loss.(name).(sc)(i));
+            if numel(component)>7
+                component = sprintf('%.1e',J.loss.(name).(sc)(i));
+            end
+            if numel(component)>7
+                component = sprintf('%.0e',J.loss.(name).(sc)(i));
+            end
+            row = [row sprintf(' | %7s %7s %7s %7s',component, ...
+                local_compact_joint_number(J.(name).NSE.(sc)(i),7,false), ...
+                local_compact_joint_number(J.(name).KGE.(sc)(i),7,false), ...
+                local_compact_joint_number(J.(name).JKGE.(sc)(i),7,false))]; %#ok<AGROW>
         end
         row = [row newline]; %#ok<AGROW>
         fprintf('%s',row);
         fprintf(fid,'%s',row);
     end
+    fprintf('%s\n',tableSep);
+    fprintf(fid,'%s\n',tableSep);
     frmt = '';
+end
+
+function text = local_compact_joint_number(value,width,isTotal)
+% Keep extreme diagnostics from widening the fixed table columns.
+    if isTotal
+        text = local_joint_total(value);
+    else
+        text = sprintf('%.3f',value);
+    end
+    if numel(text)>width
+        text = sprintf('%.1e',value);
+    end
+    if numel(text)>width
+        text = sprintf('%.0e',value);
+    end
 end
 
 function [coefficient,weight,scale] = ...

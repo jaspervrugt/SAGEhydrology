@@ -129,3 +129,6 @@ For the compiled application, copy `user_model/` beside `SAGE.exe`, alongside
 the target operating system, update its parameter metadata, and restart SAGE
 to use a replacement model. The public template supports manual model creation;
 AI-assisted model authoring and private models are excluded.
+### v1.0.3 report and GUI refresh — October 6, 2026
+
+The [v1.0.3 Windows downloads](https://github.com/jaspervrugt/SAGEhydrology/releases/tag/v1.0.3) have been refreshed with the latest GUI and PPTX printing. Reports now include complete ECDF dashboards for each selected data type, climate-zone ECDF pages with up to six zones, and two-basin multi-data-type time-series pages. These replace the previous report figures. Automatic data screening prints separately from the run summary. Saved-run replotting can regenerate reports without retraining. Public `src` and `utils` are updated here; GUI source remains private. The installer, portable package, executable, source ZIP, and checksums are refreshed together. The separate macOS build is pending.

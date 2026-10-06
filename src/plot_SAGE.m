@@ -320,6 +320,37 @@ function varargout = plot_SAGE(part,mdl,dat,bas,prd,Q,curr, ...
     % =============================
     if paperResultsOnly, fprintf('  plot_SAGE: scenario ECDFs ...\n'); end
     try 
+        % Retire the prior run's scenario/dashboard pages before rebuilding
+        % them, including observation types no longer selected in the loss.
+        priorPages=findall(groot,'Type','figure');
+        for pageIndex=1:numel(priorPages)
+            if isappdata(priorPages(pageIndex),'SAGEFigureFamily') ...
+                    && ismember(string(getappdata(priorPages(pageIndex), ...
+                    'SAGEFigureFamily')),["scenario_ecdf","observation_ecdf","zone_ecdf","timeseries"])
+                delete(priorPages(pageIndex));
+            end
+        end
+        hasJKGE = any(cellfun(@(s) local_has_data(s.metric),scenariosJKGE));
+        observations = strings(0,1);
+        if strcmpi(part,'sage') && isfield(curr,'joint')
+            observations = string(fieldnames(curr.joint));
+            observations = observations(ismember(observations,["Q","SWE","SM"]));
+        end
+        if numel(observations)>1 && exist('ecdf_dashboard_ui','file')==2
+            retained = struct('curr',curr,'iter',struct());
+            if isfield(gaugescen,'ecdf_prf'), retained=gaugescen.ecdf_prf; end
+            if isfield(gaugescen,'loss') && isfield(gaugescen.loss,'observed')
+                observations=unique(upper(string(gaugescen.loss.observed(:))),'stable');
+            end
+            for observationIndex=1:numel(observations)
+                observation=char(observations(observationIndex));
+                dashboard=ecdf_dashboard_ui('export',retained,observation, ...
+                    colors(id_model(1),:),[model_name_fig ': ' dt_str ' ECDF'], ...
+                    local_numeric_field(curr,'loss_fnc',NaN));
+                setappdata(dashboard,'SAGEExportOrder',2+(observationIndex-1)/100);
+            end
+            firstZoneFigure=6;
+        else
         % ===========================================
         % Figure 2: 1x4 ECDF panel of NSE by scenario
         % ===========================================
@@ -375,6 +406,7 @@ function varargout = plot_SAGE(part,mdl,dat,bas,prd,Q,curr, ...
                 fdcMetricTag,fdcMetricDescription);
             firstZoneFigure = 5;
         end
+        end
         if paperResultsOnly
             fprintf('  plot_SAGE: zonal ECDFs ...\n'); 
         end
@@ -382,6 +414,25 @@ function varargout = plot_SAGE(part,mdl,dat,bas,prd,Q,curr, ...
         % =======================================
         % Figure 5: 1x4 ECDF panel of NSE by zone
         % =======================================
+        if strcmpi(part,'sage') && n_m==1 && isfield(bas,'zone') ...
+                && exist('ecdf_dashboard_ui','file')==2
+            retained=struct('curr',curr,'iter',struct());
+            if isfield(gaugescen,'ecdf_prf'), retained=gaugescen.ecdf_prf; end
+            zoneObservations=observations;
+            if isempty(zoneObservations), zoneObservations="Q"; end
+            ecdf_dashboard_ui('exportzones',retained,zoneObservations,bas, ...
+                colors(id_model(1),:),[model_name_fig ': ' dt_str], ...
+                local_numeric_field(curr,'loss_fnc',NaN));
+            existingFigures=findall(groot,'Type','figure');
+            existingNumbers=0;
+            for existingIndex=1:numel(existingFigures)
+                number=existingFigures(existingIndex).Number;
+                if isscalar(number) && isfinite(number)
+                    existingNumbers(end+1)=number;
+                end
+            end
+            firstPostEcdfFigure=max(existingNumbers)+1;
+        else
         zoneIDsForLayout = [];
         if isfield(bas,'zone') ...
                 && isfield(bas.zone,'num')
@@ -446,6 +497,7 @@ function varargout = plot_SAGE(part,mdl,dat,bas,prd,Q,curr, ...
                 zonesPerPage);
         end
         firstPostEcdfFigure = firstZoneFigure + 3*nZonePages;
+        end
     
     catch ME
         warning('plot_SAGE:ecdfFailed', ...
@@ -603,7 +655,14 @@ function varargout = plot_SAGE(part,mdl,dat,bas,prd,Q,curr, ...
 
     if ~paperResultsOnly
         try
-            if local_use_four_scenario_timeseries(sp_method)
+            if isstruct(Qfdc) && isfield(Qfdc,'observations') ...
+                    && isfield(Qfdc,'observation_names') ...
+                    && numel(Qfdc.observation_names)>1 ...
+                    && isfield(gaugescen,'observation_out') ...
+                    && exist('observation_timeseries_dashboard_ui','file')==2
+                observation_timeseries_dashboard_ui('export', ...
+                    gaugescen.observation_out,gaugescen.observation_cfg);
+            elseif local_use_four_scenario_timeseries(sp_method)
                 local_plot_timeseries_fourgroups( ...
                     20,mdl,dat,bas,prd,scenariosNSE, ...
                     q_unit,t_unit,n_m,id_model, ...
@@ -674,6 +733,10 @@ function local_finalize_publication_figures(figs,theme)
 
     for k = 1:numel(figs)
         fig = figs(k);
+        if isappdata(fig,'SAGEPreservePublicationLayout') ...
+                && getappdata(fig,'SAGEPreservePublicationLayout')
+            continue
+        end
         if ~isappdata(fig,'SAGEFigureFamily')
             continue
         end
@@ -686,7 +749,7 @@ function local_finalize_publication_figures(figs,theme)
                     'FontSize',13,'TickLabelInterpreter','latex');
                 local_set_axis_text_sizes(axesList,15,16);
             case 'timeseries'
-                set(axesList,'TickLength',[0.003 0.003], ...
+                set(axesList,'TickLength',[0.0015 0.0015], ...
                     'FontSize',13);
                 local_set_axis_text_sizes(axesList,14,16);
                 fixedLabels = findall(fig,'Type','text', ...
@@ -695,7 +758,7 @@ function local_finalize_publication_figures(figs,theme)
             case 'variogram'
                 set(axesList,'TickLength',[0.012 0.012], ...
                     'FontSize',11);
-                local_set_axis_text_sizes(axesList,13,12);
+                local_set_axis_text_sizes(axesList,10,12);
             case 'zone_ecdf'
                 % Preserve the compact typography of the fixed zonal grid.
                 set(axesList,'TickLength',[0.012 0.012],'FontSize',10);
@@ -943,6 +1006,26 @@ function plot_metric_ecdf_by_zone_figure( ...
     
     zoneNames = ...
         local_zone_names_from_bas(bas);
+    if strcmpi(part,'sage') && n_m==1 && exist('ecdf_dashboard_ui','file')==2
+        prf=struct('curr',struct(),'iter',struct());
+        for scenarioIndex=1:4
+            prf.curr.(metric_tag).(scenarios{scenarioIndex}.tag)=scenarios{scenarioIndex}.metric;
+        end
+        for page=1:ceil(numel(zoneIDs)/6)
+            ids=zoneIDs((page-1)*6+1:min(page*6,numel(zoneIDs)));
+            labels=cell(1,numel(ids));
+            for c=1:numel(ids)
+                labels{c}=sprintf('Zone %d',ids(c));
+                if ids(c)<=numel(zoneNames), labels{c}=sprintf('Zone %d\n%s',ids(c),string(zoneNames{ids(c)})); end
+            end
+            zoneSpec=struct('metric',metric_tag,'page',page,'ids',ids,'labels',{labels},'bas',bas);
+            f=ecdf_dashboard_ui('export',prf,'Q',colors(id_model(1),:), ...
+                sprintf('%s: %s %s by climate zone (%d/%d)',model_name_fig,dt_str,metric_tag,page,ceil(numel(zoneIDs)/6)),7,zoneSpec);
+            setappdata(f,'SAGEExportOrder',6+(figNo-5)/100+page/1000);
+        end
+        return
+    end
+
 
     nScen = 4;
     if nargin < 17 || isempty(zonesPerPage)
@@ -3706,11 +3789,11 @@ function local_plot_parameter_variogram_page(fig,indices,gamma, ...
         if isBottomInColumn
             xticklabels(ax,xtlbl);
             xlabel(ax,'Lag distance, $h$ (km)', ...
-                'Interpreter','latex','FontSize',13);
+                'Interpreter','latex','FontSize',10);
         else
             xticklabels(ax,repmat({''},size(xt)));
         end
-        ylabel(ax,YS.ylabelLatex,'Interpreter','latex','FontSize',13);
+        ylabel(ax,YS.ylabelLatex,'Interpreter','latex','FontSize',10);
 
         % Do not embed a dollar-delimited label inside another LaTeX
         % string: that was the source of the earlier SceneNode warnings.
@@ -7582,7 +7665,7 @@ function add_basin_label(ax,us,zoneTxt,gauge,n_char,topOffsetCm,textColor)
     extent = probe.Extent;
     delete(probe);
 
-    % A translucent white field keeps basin metadata readable without
+    % A nearly opaque white field keeps basin metadata readable without
     % obscuring the forcing record. Text.BackgroundColor has no alpha
     % channel, so draw an axes patch immediately before the final text.
     padX = 0.006;
@@ -7592,7 +7675,7 @@ function add_basin_label(ax,us,zoneTxt,gauge,n_char,topOffsetCm,textColor)
     [xData,yData] = local_normalized_box_to_data(ax,xNorm,yNorm);
     patch(ax,[xData(1) xData(2) xData(2) xData(1)], ...
         [yData(1) yData(1) yData(2) yData(2)],'w', ...
-        'FaceAlpha',0.76,'EdgeColor','none', ...
+        'FaceAlpha',0.95,'EdgeColor','none', ...
         'HandleVisibility','off','Clipping','on', ...
         'Tag','SAGEBasinLabelBackground');
     text(ax,x0,y0,labelText, ...
@@ -8256,8 +8339,8 @@ function local_plot_one_fdc_group_page( ...
             'Units','normalized', ...
             'HorizontalAlignment','left', ...
             'VerticalAlignment','bottom', ...
-            'fontsize',12, ...
-            'interpreter','none');
+            'fontsize',14, ...
+            'interpreter','none','Tag','SAGEFDCBasinLabel');
     
         if any(is == [1 2]) ...
                 && ok
@@ -8296,7 +8379,8 @@ function local_plot_one_fdc_group_page( ...
         sharedLimits = [min(limits(:,1)) max(limits(:,2))];
         [ticks,tickLabels] = local_fdc_major_xticks( ...
             sharedLimits(1),sharedLimits(2));
-        set([axLeft axRight],'YLim',sharedLimits,'YTick',ticks);
+        set([axLeft axRight],'YLim',sharedLimits,'YTick',ticks, ...
+            'TickLabelInterpreter','latex');
         set(axLeft,'YTickLabel',tickLabels);
         set(axRight,'YTickLabel',[]);
         local_draw_top_right_box_no_legend(axLeft);

@@ -347,6 +347,10 @@ function imgFiles = local_export_figures_to_png(figs,tmpDir)
             || contains(figureName,"evaluation basin");
         imgFiles{k} = fullfile(tmpDir, ...
             sprintf('fig_%03d.png',k));
+        if isappdata(f,'SAGEPreservePublicationLayout') ...
+                && getappdata(f,'SAGEPreservePublicationLayout')
+            imgFiles{k}=fullfile(tmpDir,sprintf('fig_%03d_fullpage.png',k));
+        end
     
         try
             fprintf('Exporting figure %d/%d: %s\n', ...
@@ -442,6 +446,15 @@ function local_export_one_figure_png(f,pngFile,isFDC)
     if nargin < 3
         isFDC = false;
     end
+    if isappdata(f,'SAGEPreservePublicationLayout') ...
+            && getappdata(f,'SAGEPreservePublicationLayout')
+        % Render the complete 16:9 canvas without tight cropping or a
+        % screen capture. Figure text and geometry are already scaled.
+        set(f,'PaperUnits','inches','PaperPosition',[0 0 16 9], ...
+            'PaperSize',[16 9],'InvertHardcopy','off');
+        print(f,pngFile,'-dpng','-r120');
+        return
+    end
     
     try
         set(f,'Color','w');
@@ -527,6 +540,10 @@ function local_write_pptx_from_png(C, ...
         end
 
         pres = invoke(ppt.Presentations,'Add');
+        if any(contains(string(imgFiles),'_fullpage'))
+            pres.PageSetup.SlideWidth=960;
+            pres.PageSetup.SlideHeight=540;
+        end
         ppLayoutBlank = 12;
 
         % ------------------------
@@ -1273,30 +1290,58 @@ function local_add_run_notes_slide(pres,ppLayoutBlank,C)
         return
     end
 
-    slides = get(pres,'Slides');
-    slideCount = get(slides,'Count');
-    slideIndex = slideCount + 1;
-    slide = invoke(slides,'Add',slideIndex,ppLayoutBlank);
-    shapes = get(slide,'Shapes');
+    % Keep automatic screening/actions separate from the run summary.
+    splitAt = regexp(char(note),'(?i)Automatic data(?:-quality screening| actions)','start','once');
+    sections = {char(note)}; headings = {'Run Notes'};
+    if ~isempty(splitAt)
+        sections = {strtrim(regexprep(char(extractBefore(note,splitAt)), ...
+            '[-=\s]+$','')),char(extractAfter(note,splitAt-1))};
+        headings = {'Run Notes','Automatic data screening and actions'};
+    end
     slideW = get(pres.PageSetup,'SlideWidth');
     slideH = get(pres.PageSetup,'SlideHeight');
-
-    titleBox = invoke(shapes,'AddTextbox',1,40,30,slideW-80,45);
-    titleBox.TextFrame.TextRange.Text = 'Run Notes';
-    titleBox.TextFrame.TextRange.Font.Name = theme.export.fontName;
-    titleBox.TextFrame.TextRange.Font.Size = theme.export.titleSize;
-    titleBox.TextFrame.TextRange.Font.Bold = 1;
-
-    noteBox = invoke(shapes,'AddTextbox', ...
-        1,55,90,slideW-110,slideH-125);
-    noteBox.TextFrame.TextRange.Text = char(note);
-    noteBox.TextFrame.TextRange.Font.Name = theme.export.fontName;
-    noteBox.TextFrame.TextRange.Font.Size = theme.export.bodySize;
-    noteBox.TextFrame.WordWrap = -1;
-    noteBox.TextFrame.MarginLeft = 8;
-    noteBox.TextFrame.MarginRight = 8;
-    noteBox.TextFrame.MarginTop = 6;
-    noteBox.TextFrame.MarginBottom = 6;
+    % Conservative word wrapping and pagination leave room for descenders.
+    width = max(40,floor((slideW-126)/(0.55*theme.export.bodySize)));
+    capacity = max(8,floor((slideH-145)/(1.5*theme.export.bodySize)));
+    for sectionIndex=1:numel(sections)
+        lines = splitlines(string(sections{sectionIndex}));
+        wrapped = strings(0,1);
+        for lineIndex=1:numel(lines)
+            words = split(strtrim(lines(lineIndex))); current = "";
+            for wordIndex=1:numel(words)
+                candidate = strtrim(current+" "+words(wordIndex));
+                if strlength(candidate)>width && strlength(current)>0
+                    wrapped(end+1,1)=current; current=words(wordIndex);
+                else
+                    current=candidate;
+                end
+            end
+            wrapped(end+1,1)=current;
+        end
+        pages=ceil(numel(wrapped)/capacity);
+        for page=1:pages
+            slides = get(pres,'Slides');
+            slide = invoke(slides,'Add',get(slides,'Count')+1,ppLayoutBlank);
+            shapes = get(slide,'Shapes');
+            titleBox = invoke(shapes,'AddTextbox',1,40,30,slideW-80,45);
+            heading=headings{sectionIndex};
+            if pages>1, heading=sprintf('%s (%d/%d)',heading,page,pages); end
+            titleBox.TextFrame.TextRange.Text = heading;
+            titleBox.TextFrame.TextRange.Font.Name = theme.export.fontName;
+            titleBox.TextFrame.TextRange.Font.Size = theme.export.titleSize;
+            titleBox.TextFrame.TextRange.Font.Bold = 1;
+            noteBox = invoke(shapes,'AddTextbox',1,55,90,slideW-110,slideH-125);
+            selected=(page-1)*capacity+1:min(page*capacity,numel(wrapped));
+            noteBox.TextFrame.TextRange.Text = char(join(wrapped(selected),newline));
+            noteBox.TextFrame.TextRange.Font.Name = theme.export.fontName;
+            noteBox.TextFrame.TextRange.Font.Size = theme.export.bodySize;
+            noteBox.TextFrame.WordWrap = -1;
+            noteBox.TextFrame.MarginLeft = 8;
+            noteBox.TextFrame.MarginRight = 8;
+            noteBox.TextFrame.MarginTop = 6;
+            noteBox.TextFrame.MarginBottom = 6;
+        end
+    end
 end
 
 function [imgW,imgH] = local_graphic_size(imgFile)
@@ -1361,6 +1406,7 @@ function local_add_image_slide(pres,ppLayoutBlank,imgFile,margin)
         margin = 20;
     end
     imgFile = char(string(imgFile));
+    if contains(imgFile,'_fullpage'), margin=0; end
     
     if ~isfile(imgFile)
         error(['PNG file not ' ...
