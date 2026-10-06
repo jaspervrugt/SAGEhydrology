@@ -8,9 +8,9 @@ implementations are excluded.
 
 ## Changes from v1.0.2
 
-- **Projects:** the compiled GUI includes publication Projects 1‚Äì5 and the
-  new-user-project workflow. ‚ÄúOpen source‚Äù opens readable MATLAB exports;
-  scripts for Projects 1‚Äì2 are included rather than pointing to missing files.
+- **Projects:** the compiled GUI includes publication Projects 1ñ5 and the
+  new-user-project workflow. ìOpen sourceî opens readable MATLAB exports;
+  scripts for Projects 1ñ2 are included rather than pointing to missing files.
   Project settings are locked while a SAGE run is active.
 - **Custom C++ models:** the manual `user_model` option is available independently
   of the AI builder. A sibling `user_model` folder supplies parameter metadata
@@ -38,7 +38,7 @@ implementations are excluded.
   per figure, with a scale in each figure's top-left panel and its own colorbar.
 - **Source examples:** exactly three examples are supplied:
   `demo_SAGE.mlx`, `verify_jacobians_and_gradients.m`, and
-  `run_SAGE_export_hymod.m`. Project 3‚Äì5 exports reside in their project folders.
+  `run_SAGE_export_hymod.m`. Project 3ñ5 exports reside in their project folders.
   Example paths derive the installation root from their file location.
 
 ## Which Windows download should I use?
@@ -48,7 +48,6 @@ implementations are excluded.
 | `SAGE-v1.0.3-Windows-x64-installer.exe` | Guided installation; obtains MATLAB Runtime R2026a through web delivery when required. |
 | `SAGE-v1.0.3-Windows-x64-portable.zip` | Recommended for an existing Software/Data installation. Includes SAGE.exe, public supporting files, maps, projects, and the manual user-model template/kernel. Requires MATLAB Runtime R2026a. |
 | `SAGE-v1.0.3-Windows-x64.exe` | The application executable alone, for replacing an existing installation's executable. Requires MATLAB Runtime R2026a and separately maintained Data/user-model files. |
-| `SAGE-v1.0.3-computational-source.zip` | Updated public MATLAB/C++ source and manual user-model template. Requires MATLAB for source execution; contains no GUI source or native binaries. |
 
 The installer and portable executable deliver the same v1.0.3 GUI and model
 capabilities. The difference is installation and Runtime setup, not functionality.
@@ -64,7 +63,7 @@ Runtime cannot execute arbitrary `.m` scripts. Compiled GUI use is covered by
 License. Readable GUI source, private models, AI-builder files, results, and
 development caches are excluded from public assets.
 
-The public repository directories are updated for v1.0.3, including src, models, projects, regions, utils, the manual user-model template, and the three-file examples directory. The computational-source ZIP provides the release snapshot in the Software/SAGEhydrology and Software/user_model layout.
+The public repository directories are updated for v1.0.3, including src, models, projects, regions, utils, the manual user-model template, and the three-file examples directory. Current public source is available on the main branch.
 
 ## Platform and validation
 
@@ -75,5 +74,15 @@ Source/dependency and GUI startup checks passed. Full training through the final
 GUI and installation on a clean Windows machine have not been independently
 verified in this release preparation.
 
-macOS v1.0.3 binaries are not included yet; they require a separate macOS build.
-The macOS v1.0.2 downloads remain available on the previous release.
+macOS v1.0.3 builds for Apple Silicon are now available in this release.
+
+## macOS downloads available
+
+SAGE v1.0.3 now includes macOS builds for **Apple Silicon (arm64)** alongside the existing Windows downloads.
+
+- `SAGE-v1.0.3-macOS-arm64-installer.zip`: unzip and run the installer application; MATLAB Runtime R2026a is obtained when required.
+- `SAGE-v1.0.3-macOS-arm64.dmg`: disk image containing the application; requires the Apple Silicon MATLAB Runtime R2026a.
+
+Download both options from [the v1.0.3 release](https://github.com/jaspervrugt/SAGEhydrology/releases/tag/v1.0.3). These packages target Apple Silicon; they are not Intel Mac builds.
+
+The supplied macOS build report records arm64 launcher, native MEX, ZIP and DMG checks. Downloaded file hashes were verified against that report. Windows downloads are unchanged.
