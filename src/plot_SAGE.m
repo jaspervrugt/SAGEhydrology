@@ -166,22 +166,14 @@ function varargout = plot_SAGE(part,mdl,dat,bas,prd,Q,curr, ...
     figW = scr(3) / ppi;
     figH = scr(4) / ppi;                % 92.5% of screen height
     
-    % ---------- colors ----------
-    colors = [ ...
-        214/255  39/255  40/255; ...    % red    - hymod
-         44/255 160/255  44/255; ...    % green  - hmodel
-        148/255 103/255 189/255; ...    % purple - sacsma
-        140/255  86/255  75/255; ...    % brown  - Xinanjiang
-         31/255 119/255 180/255; ...    % blue   - gr4j
-        255/255 127/255  14/255; ...    % orange - hbv
-        0.9000 0.0000 0.9000;   ...     % magenta - cfe_nwm
-        0.8500 0.3250 0.0980;   ...     % copper  - gchm (model 11)
-        0.4940 0.1840 0.5560;   ...     % violet  - user_model (model 99)
-        0.6500 0.6500 0.6500];          % gray    - unknown
+    % ---------- canonical visual theme ----------
+    visualTheme = sage_visual_theme();
+    colors = [visualTheme.colors.model; ...
+        visualTheme.colors.modelUnknown];
     
-    fontsize_legend = 16;
+    fontsize_legend = visualTheme.plots.legendSize;
     face_alpha = 0.50;
-    marker_alpha = 0.70; 
+    marker_alpha = visualTheme.plots.observationAlpha;
     model_names = mdl.names;
     
     % % soft background shading
@@ -191,11 +183,10 @@ function varargout = plot_SAGE(part,mdl,dat,bas,prd,Q,curr, ...
     % % muted data-point colors
     % cPtTrain = [0.20 0.45 0.70];      % muted blue
     % cPtEval = [0.85 0.50 0.20];       % muted orange
-    cShadeTrain = [0.94 0.94 0.94];
-    cShadeEval = [0.90 0.92 0.96];
-    
-    cPtTrain = [0.25 0.25 0.25];
-    cPtEval = [0.55 0.55 0.55];
+    cShadeTrain = visualTheme.colors.shading.training;
+    cShadeEval = visualTheme.colors.shading.evaluation;
+    cPtTrain = visualTheme.plots.observationColor;
+    cPtEval = visualTheme.plots.observationColor;
     
     if strcmpi(part,'sage')
         n_m = 1;
@@ -236,7 +227,7 @@ function varargout = plot_SAGE(part,mdl,dat,bas,prd,Q,curr, ...
             model_name_fig = 'SAGE';
         else
             model_name_fig = local_model_display_name( ...
-                sage_model_name(mdl.model(1)));
+                local_selected_model_name(mdl));
             if isfield(mdl,'variant') ...
                     && strcmpi(string(mdl.variant),'gchm_ode')
                 model_name_fig = 'GCHM_ODE';
@@ -454,6 +445,7 @@ function varargout = plot_SAGE(part,mdl,dat,bas,prd,Q,curr, ...
                 fdcMetricTag,fdcMetricDescription,bas, ...
                 zonesPerPage);
         end
+        firstPostEcdfFigure = firstZoneFigure + 3*nZonePages;
     
     catch ME
         warning('plot_SAGE:ecdfFailed', ...
@@ -461,6 +453,8 @@ function varargout = plot_SAGE(part,mdl,dat,bas,prd,Q,curr, ...
             'ECDF figures could not be ', ...
              'created and will be skipped.\n%s'], ...
              ME.message);
+        % Retain the traditional starting point if ECDF preparation fails.
+        firstPostEcdfFigure = 11;
     end
     
     % ===========================
@@ -477,7 +471,7 @@ function varargout = plot_SAGE(part,mdl,dat,bas,prd,Q,curr, ...
                 pspace_trace = 1;
             end
         end   
-        plot_parameter_traces_figure(11, ...
+        plot_parameter_traces_figure(firstPostEcdfFigure, ...
             mdl,tTheta,figW,figH,model_name_fig, ...
             pspace_trace);
     end
@@ -493,16 +487,33 @@ function varargout = plot_SAGE(part,mdl,dat,bas,prd,Q,curr, ...
                 'country-border parameter maps ...\n']); 
         end
         try
+            nMapPages=ceil(size(nTheta,1)/20);
+            for mapPage=1:nMapPages
+                parameterIds=(mapPage-1)*20+1:min(mapPage*20,size(nTheta,1));
+                pageModel=mdl;
+                pageModel.map_parameter_indices=parameterIds;
+                pageNumber=firstPostEcdfFigure+1;
+                if mapPage>1, pageNumber=pageNumber+1000+mapPage; end
+                pageName=model_name_fig;
+                if nMapPages>1
+                    pageName=sprintf('%s (figure %d/%d)',model_name_fig,mapPage,nMapPages);
+                end
             if plot_map == 1
-                plot_parameter_maps_figure(12, ...
-                    mdl,bas,latlon,nTheta,region, ...
-                    model_name_fig,figW,figH, ...
+                plot_parameter_maps_figure(pageNumber, ...
+                    pageModel,bas,latlon,nTheta(parameterIds,:),region, ...
+                    pageName,figW,figH, ...
                     gaugescen);
             elseif plot_map == 2
-                plot_parameter_maps_country_figure(12, ...
-                    mdl,bas,latlon,nTheta,region, ...
-                    model_name_fig,figW,figH, ...
+                plot_parameter_maps_country_figure(pageNumber, ...
+                    pageModel,bas,latlon,nTheta(parameterIds,:),region, ...
+                    pageName,figW,figH, ...
                     gaugescen);
+            end
+            mapFigure = findobj(groot,'Type','figure', ...
+                'Number',pageNumber);
+            if ~isempty(mapFigure)
+                setappdata(mapFigure(1),'SAGEExportOrder',12+(mapPage-1)/100);
+            end
             end
         catch ME
             warning('plot_SAGE:parameterMapFailed', ...
@@ -526,12 +537,12 @@ function varargout = plot_SAGE(part,mdl,dat,bas,prd,Q,curr, ...
         try
             if strcmpi(part,'sage')
                 % SAGE: nTheta is d x K
-                plot_parameter_variograms_figure(13, ...
+                plot_parameter_variograms_figure(firstPostEcdfFigure+2, ...
                     mdl,latlon,nTheta,model_name_fig,region)
     
             elseif strcmpi(part,'site')
                 % SITE: nTheta is d x K x n_m
-                plot_parameter_variograms_SITE_figure(13, ...
+                plot_parameter_variograms_SITE_figure(firstPostEcdfFigure+2, ...
                     mdl,latlon,nTheta,region);
             end
     
@@ -560,12 +571,22 @@ function varargout = plot_SAGE(part,mdl,dat,bas,prd,Q,curr, ...
             %
             % The GUI reduces each d x K slice across basins and then plots
             % parameter x iteration. This reproduces that same convention here.
-            plot_parameter_attribution_figure(14, ...
+            plot_parameter_attribution_figure(firstPostEcdfFigure+3, ...
                 mdl,At,An,figW,figH, ...
                 model_name_fig,'abs');
-            plot_parameter_attribution_figure(15, ...
+            plot_parameter_attribution_figure(firstPostEcdfFigure+4, ...
                 mdl,At,An,figW,figH, ...
                 model_name_fig,'rel');
+            attributionFigure = findobj(groot,'Type','figure', ...
+                'Number',firstPostEcdfFigure+3);
+            if ~isempty(attributionFigure)
+                setappdata(attributionFigure(1),'SAGEExportOrder',14);
+            end
+            attributionFigure = findobj(groot,'Type','figure', ...
+                'Number',firstPostEcdfFigure+4);
+            if ~isempty(attributionFigure)
+                setappdata(attributionFigure(1),'SAGEExportOrder',15);
+            end
         catch ME
             warning('plot_SAGE:parameterAttributionFailed', ...
                 ['      Warning: plot_SAGE: ' ...
@@ -629,13 +650,77 @@ function varargout = plot_SAGE(part,mdl,dat,bas,prd,Q,curr, ...
         end
     end
     % ========================================
-    
+    local_apply_canonical_figure_theme();
 
 end
 
 % ================
 % helper functions
 % ================
+function local_apply_canonical_figure_theme()
+% Apply one standalone contract after all figure families are assembled.
+    theme = sage_visual_theme();
+    figs = findall(groot,'Type','figure');
+    keep = false(size(figs));
+    for k = 1:numel(figs)
+        keep(k) = isprop(figs(k),'Number');
+    end
+    sage_apply_figure_theme(figs(keep),theme,'standalone');
+    local_finalize_publication_figures(figs(keep),theme);
+end
+
+function local_finalize_publication_figures(figs,theme)
+% Restore family-specific publication geometry after the common theme.
+
+    for k = 1:numel(figs)
+        fig = figs(k);
+        if ~isappdata(fig,'SAGEFigureFamily')
+            continue
+        end
+        family = char(string(getappdata(fig,'SAGEFigureFamily')));
+        axesList = findall(fig,'Type','axes');
+        axesList = axesList(~strcmpi(get(axesList,'Tag'),'legend'));
+        switch family
+            case 'fdc'
+                set(axesList,'TickLength',[0.010 0.010], ...
+                    'FontSize',13,'TickLabelInterpreter','latex');
+                local_set_axis_text_sizes(axesList,15,16);
+            case 'timeseries'
+                set(axesList,'TickLength',[0.003 0.003], ...
+                    'FontSize',13);
+                local_set_axis_text_sizes(axesList,14,16);
+                fixedLabels = findall(fig,'Type','text', ...
+                    'Tag','SAGEFixedLeftYLabel');
+                set(fixedLabels,'FontSize',14);
+            case 'variogram'
+                set(axesList,'TickLength',[0.012 0.012], ...
+                    'FontSize',11);
+                local_set_axis_text_sizes(axesList,13,12);
+            case 'zone_ecdf'
+                % Preserve the compact typography of the fixed zonal grid.
+                set(axesList,'TickLength',[0.012 0.012],'FontSize',10);
+                local_set_axis_text_sizes(axesList,10,11);
+            case 'scenario_ecdf'
+                % Longer ticks improve registration across small square
+                % ECDF panels, while retaining compact tick typography.
+                set(axesList,'TickLength',[0.030 0.030], ...
+                    'FontSize',12);
+                local_set_axis_text_sizes(axesList,13,14);
+        end
+        set(axesList,'FontName',theme.plots.fontName);
+    end
+end
+
+function local_set_axis_text_sizes(axesList,labelSize,titleSize)
+% Apply compact family-level label/title sizes without changing content.
+
+    for k = 1:numel(axesList)
+        axesList(k).XLabel.FontSize = labelSize;
+        axesList(k).YLabel.FontSize = labelSize;
+        axesList(k).Title.FontSize = titleSize;
+    end
+end
+
 function plot_metric_ecdf_figure(figNo,part, ...
     mdl,dt_str,scenarios,n_m,id_model, ...
     model_names,colors,figW,figH,model_name_fig, ...
@@ -650,6 +735,7 @@ function plot_metric_ecdf_figure(figNo,part, ...
     
     figure(figNo); clf;
     fig = gcf;
+    setappdata(fig,'SAGEFigureFamily','scenario_ecdf');
     set(fig,'Name', ...
         sprintf(['%s: Empirical Cumulative ' ...
         'Distribution Functions: %s'], ...
@@ -872,6 +958,7 @@ function plot_metric_ecdf_by_zone_figure( ...
         nCol = numel(pageZones);
 
         f = figure(figNo+page-1); clf(f);
+        setappdata(f,'SAGEFigureFamily','zone_ecdf');
         pageWidth = min(0.95*figW,2.85*nCol+1.65);
         pageHeight = min(0.95*figH,10.8);
         set(f,'Name',sprintf( ...
@@ -879,21 +966,40 @@ function plot_metric_ecdf_by_zone_figure( ...
             model_name_fig,metric_tag,page,nPage), ...
             'NumberTitle','off','Color','w','Units','inches', ...
             'Position',[0.2 0.2 pageWidth pageHeight]);
+        switch upper(strtrim(char(metric_tag)))
+            case 'NSE'
+                zoneExportBase = 6;
+            case 'KGE'
+                zoneExportBase = 7;
+            otherwise
+                % JKGE or the alternative FDC metric occupies the third
+                % zonal-ECDF block.
+                zoneExportBase = 8;
+        end
+        setappdata(f,'SAGEExportOrder', ...
+            zoneExportBase+(page-1)/100);
 
-        tlo = tiledlayout(f,nScen,nCol, ...
-            'TileSpacing','compact','Padding','compact');
+        % A tiled layout recalculates margins from title/metric text. Use
+        % identical plot boxes for every metric and zone page instead.
+        left=0.12; right=0.035; bottom=0.085; top=0.17;
+        colGap=0.055; rowGap=0.035;
+        panelWidth=(1-left-right-(nCol-1)*colGap)/nCol;
+        panelHeight=(1-bottom-top-(nScen-1)*rowGap)/nScen;
 
         for izPage = 1:nCol
             zid = pageZones(izPage);
             for is = 1:nScen %#ok<ALIGN>
-                axh = nexttile(tlo,(is-1)*nCol+izPage);
+                axh = axes(f,'Units','normalized','Position', ...
+                    [left+(izPage-1)*(panelWidth+colGap), ...
+                     1-top-is*panelHeight-(is-1)*rowGap, ...
+                     panelWidth,panelHeight],'PositionConstraint','innerposition');
             hold(axh,'on');
             box(axh,'off');
     
             set(axh,'tickdir','out', ...
                 'ticklength',[0.015 0.015], ...
                 'FontName','Candara', ...
-                'fontsize',13, ...
+                'fontsize',10, ...
                 'linewidth',1);
     
             xlim(axh,[xL xR]);
@@ -907,11 +1013,11 @@ function plot_metric_ecdf_by_zone_figure( ...
                     title(axh,{sprintf('Zone %d',zid), ...
                         char(string(zoneNames(zid)))}, ...
                         'Interpreter','none','FontName','Candara', ...
-                        'FontSize',12,'FontWeight','bold');
+                        'FontSize',11,'FontWeight','bold');
                 else
                     title(axh,sprintf('Zone %d',zid), ...
                         'Interpreter','none','FontName','Candara', ...
-                        'FontSize',12,'FontWeight','bold');
+                        'FontSize',11,'FontWeight','bold');
                 end
             end
             
@@ -922,7 +1028,7 @@ function plot_metric_ecdf_by_zone_figure( ...
                 ylabel(axh,ytxt, ...
                     'interpreter','none', ...
                     'FontName','Candara', ...
-                    'FontSize',12, ...
+                    'FontSize',10, ...
                     'FontWeight','bold');
             else
                 axh.YTickLabel = [];
@@ -938,7 +1044,7 @@ function plot_metric_ecdf_by_zone_figure( ...
                 xlabel(axh,local_metric_candara_symbol(metric_tag), ...
                     'interpreter','tex', ...
                     'FontName','Candara', ...
-                    'fontsize',12);
+                    'fontsize',10);
             else
                 axh.XTickLabel = [];
             end
@@ -1005,7 +1111,7 @@ function plot_metric_ecdf_by_zone_figure( ...
                 'HorizontalAlignment','left', ...
                 'VerticalAlignment','top', ...
                 'interpreter','latex', ...
-                'fontsize',13);
+                'fontsize',10);
             
             SIBtxt = local_sib_text(SIBz);
             % S_IB in bottom-right
@@ -1016,7 +1122,7 @@ function plot_metric_ecdf_by_zone_figure( ...
                     'HorizontalAlignment','right', ...
                     'VerticalAlignment','bottom', ...
                     'interpreter','latex', ...
-                    'fontsize',13);
+                    'fontsize',10);
             end
     
             if n_m > 1 && izPage == nCol && is == 1
@@ -1037,7 +1143,6 @@ function plot_metric_ecdf_by_zone_figure( ...
             'scenario --- %d/%d'],samp_word,page,nPage);
         % Separate full-width text boxes center each line independently.
         % A multiline TeX sgtitle can left-align lines containing subscripts.
-        tlo.OuterPosition = [0 0 1 0.915];
         annotation(f,'textbox',[0.02 0.955 0.96 0.04], ...
             'String',titleLine1,'Interpreter','tex', ...
             'FontName','Candara','FontSize',16,'FontWeight','normal', ...
@@ -1771,8 +1876,7 @@ function name = local_part_name(part,mdl)
         if isempty(mdl.model)
             name = 'SAGE';
         else
-            name = char(string( ...
-                string(sage_model_name(mdl.model(1)))));
+            name = local_selected_model_name(mdl);
         end
     else
         name = 'SITE';
@@ -1842,7 +1946,7 @@ end
 
 function plot_parameter_traces_figure(figNo, ...
     mdl,tTheta,figW,figH,model_name_fig,pspace)
-%PLOT_PARAMETER_TRACES_FIGURE Plot parameter trace summaries in one figure
+%PLOT_PARAMETER_TRACES_FIGURE Plot GUI-style trace summaries, 10 per page.
 %
 % SYNOPSIS:
 %   plot_parameter_traces_figure(figNo,mdl,tTheta,model_name_fig)
@@ -1879,7 +1983,7 @@ function plot_parameter_traces_figure(figNo, ...
             'tTheta must have size [i_max x d x 7].');
     end
     
-    [i_max,d,~] = size(tTheta); %#ok
+    [~,d,~] = size(tTheta);
     
     % ---------------------
     % Keep valid iterations
@@ -1892,289 +1996,150 @@ function plot_parameter_traces_figure(figNo, ...
     tTheta = tTheta(keep,:,:);
     x = find(keep);
     
-    % ------
-    % Layout
-    % ------
-    ncol = 2;
-    nrow = ceil(d/ncol);
-    
-    leftMargin = 0.12;
-    rightMargin = 0.04;
-    topMargin = 0.04;
-    bottomMargin = 0.06;
-    
-    colGap = 0.1;    
-    rowGap = 0.025;
-    
-    axW = (1 - leftMargin - rightMargin ...
-        - colGap) / ncol;
-    axH = (1 - topMargin - bottomMargin ...
-        - (nrow-1)*rowGap) / nrow;
-    
-    figW = min(0.95*figW,8.5);
-    figH = min(0.95*figH,1.2*nrow + 0.8);
-    
-    figTrace = figure(figNo); 
-    clf(figTrace);
-    set(figTrace, ...
-        'Units','inches', ...
-        'Position',[0.1 0.1 figW figH], ...
-        'NumberTitle','off', ...
-        'color','w', ...
-        'Name',sprintf(['%s: ' ...
-        'Parameter traces'], ...
-        model_name_fig));
-    
-    ax = gobjects(d,1);
-    ylh = gobjects(d,1);
-    
-    % -----
-    % Style
-    % -----
-    fsAxis = 14;
-    fsLabel = 14;
-    fsPanel = 13;
-    
-    lwMed = 1.5;
-    lwBound = 1.0;
-    
-    % band1 = [0.90 0.90 0.90];
-    % band2 = [0.75 0.75 0.75];
-    % band3 = [0.55 0.55 0.55];
-    band1 = [0.85 0.92 0.98];   % light blue (5–95)
-    band2 = [0.65 0.80 0.93];   % medium (15–85)
-    band3 = [0.40 0.65 0.85];   % darker (25–75)
-    
-    % -------------------------
-    % Common x-axis range/ticks
-    % -------------------------
-    xmax_all = x(end);
-    xt_all = local_trace_xticks(xmax_all);
-    
-    % -----------
-    % Loop panels
-    % -----------
-    for r = 1:nrow
-        for c = 1:ncol
-    
-            j = (r-1)*ncol + c;
-            if j > d
-                continue
+    % Remove trace pages left by an earlier call without touching any
+    % other plot_SAGE result figures.
+    oldFigures = findall(groot,'Type','figure');
+    for k = 1:numel(oldFigures)
+        try
+            if isappdata(oldFigures(k),'SAGETracePage')
+                close(oldFigures(k));
             end
-    
-            left = leftMargin + ...
-                (c-1)*(axW + colGap);
-            bottom = 1 - topMargin ...
-                - r*axH - (r-1)*rowGap;
-    
-            ax(j) = axes('Position', ...
-                [left bottom axW axH]);
-            hold(ax(j),'on');
-            box(ax(j),'off');
-    
-            Q = reshape(tTheta(:,j,:), ...
-                size(tTheta,1),size(tTheta,3));
-    
-            % -------------------------------------
-            % Transform to physical space if needed
-            % -------------------------------------
-            if pspace == 0
-                [thmin,thmax] = ...
-                    local_trace_param_bounds(mdl,j);
-                if isfinite(thmin) ...
-                        && isfinite(thmax)
-                    Q = thmin + Q.*(thmax - thmin);
-                end
-            end
-    
-            q05 = Q(:,1);
-            q15 = Q(:,2);
-            q25 = Q(:,3);
-            q50 = Q(:,4);
-            q75 = Q(:,5);
-            q85 = Q(:,6);
-            q95 = Q(:,7);
-    
-            good = isfinite(q50);
-            if ~any(good)
-                continue
-            end
-            xx = x(good);
-    
-            % ----------------
-            % Percentile bands
-            % ----------------
-            fill(ax(j),[xx; flipud(xx)], ...
-                [q05(good); flipud(q95(good))], ...
-                band1,'EdgeColor','none');
-    
-            fill(ax(j),[xx; flipud(xx)], ...
-                [q15(good); flipud(q85(good))], ...
-                band2,'EdgeColor','none');
-    
-            fill(ax(j),[xx; flipud(xx)], ...
-                [q25(good); flipud(q75(good))], ...
-                band3,'EdgeColor','none');
-    
-            % median
-            plot(ax(j),xx, ...
-                q50(good),'k', ...
-                'linewidth',lwMed);
-    
-            xmax = xmax_all;
-    
-            % --------------
-            % Y-axis scaling
-            % --------------
-            if pspace == 1
-                plot(ax(j),[1 xmax], ...
-                    [0 0],'r--', ...
-                    'linewidth',lwBound);
-                plot(ax(j),[1 xmax], ...
-                    [1 1],'r--', ...
-                    'linewidth',lwBound);
-    
-                ylim(ax(j),[-0.1 1.1]);
-                yt = 0:0.2:1;
-    
-            else
-                [thmin,thmax] = ...
-                    local_trace_param_bounds(mdl,j);
-    
-                if isfinite(thmin) ...
-                        && isfinite(thmax)
-                    plot(ax(j),[1 xmax], ...
-                        [thmin thmin],'r--', ...
-                        'linewidth',lwBound);
-                    plot(ax(j),[1 xmax], ...
-                        [thmax thmax],'r--', ...
-                        'linewidth',lwBound);
-                end
-    
-                yall = [q05(good); q15(good); ...
-                        q25(good); q50(good); ...
-                        q75(good); q85(good); ...
-                        q95(good); thmin; thmax];
-                yall = yall(isfinite(yall));
-    
-                if isempty(yall)
-                    ylim(ax(j),[-0.1 1.1]);
-                else
-                    ylo = min(yall);
-                    yhi = max(yall);
-    
-                    if yhi <= ylo
-                        dy = max(1e-6, ...
-                            0.01*max(abs([ylo yhi])));
-                        ylo = ylo - dy;
-                        yhi = yhi + dy;
-                    end
-    
-                    pad = 0.08*(yhi - ylo);
-                    ylim(ax(j),[ylo-pad yhi+pad]);
-                end
-    
-                yt = get(ax(j),'YTick');
-            end
-    
-            xlim(ax(j),[1 xmax]);
-    
-            % ------------
-            % Axis styling
-            % ------------
-            set(ax(j), ...
-                'fontname','Times', ...
-                'fontsize',fsAxis, ...
-                'tickdir','out', ...
-                'linewidth',1, ...
-                'XTick',xt_all, ...
-                'YTick',yt, ...
-                'XMinorTick','on', ...
-                'YMinorTick','off');
-    
-            ax(j).XRuler.TickLabelGapOffset = -2;
-            ax(j).YRuler.TickLabelGapOffset = -1;
-    
-            % -------------------------------------
-            % X label (bottom panel in each column)
-            % -------------------------------------
-            if j + ncol > d
-                xlabel(ax(j),'Iteration, $i$', ...
-                    'interpreter','latex', ...
-                    'fontsize',fsLabel);
-            else
-                set(ax(j),'XTickLabel',[]);
-            end
-    
-            % -------------------------------------------------------
-            % Y-axis: show ticks + labels in BOTH columns (left side)
-            % -------------------------------------------------------
-            set(ax(j), ...
-                'YAxisLocation','left', ...
-                'YTickLabelMode','auto');
-            
-            ax(j).YRuler.TickLabelGapOffset = -1;
-    
-            % -------
-            % Y label
-            % -------
-            ylh(j) = ylabel(ax(j), ...
-                trace_ylabel_general( ...
-                mdl,j,pspace), ...
-                'interpreter','latex', ...
-                'fontsize',fsLabel);
-    
-            % panel label
-            local_panel_label(ax(j),j,fsPanel);
-    
-            % top/right frame
-            local_draw_top_right_box(ax(j));
+        catch
         end
     end
-    
-    % ------------
-    % Align labels
-    % ------------
-    drawnow;
-    
-    leftIdx = 1:2:d;
-    rightIdx = 2:2:d;
-    
-    if ~isempty(leftIdx)
-        local_align_ylabels(ax(leftIdx));
+
+    perPage = 10;
+    nPages = ceil(d/perPage);
+    for page = 1:nPages
+        first = (page-1)*perPage + 1;
+        last = min(d,page*perPage);
+        if page == 1
+            pageFigure = figure(figNo);
+        else
+            % Additional numbered figures are deliberately placed outside
+            % plot_SAGE's normal figure-number range. SAGEExportOrder keeps
+            % all trace pages together in the PPTX report.
+            pageFigure = figure(figNo + 1000 + page);
+        end
+        local_plot_parameter_trace_page(pageFigure,mdl,tTheta,x, ...
+            first:last,figW,figH,model_name_fig,pspace,page,nPages);
     end
-    if ~isempty(rightIdx)
-        local_align_ylabels(ax(rightIdx));
-    end
-    
-    drawnow;
-    
-    for j = 1:d
-        if ~isgraphics(ylh(j))
+
+end
+
+function local_plot_parameter_trace_page(figTrace,mdl,tTheta,x,indices, ...
+        figW,figH,modelName,pspace,page,nPages)
+%LOCAL_PLOT_PARAMETER_TRACE_PAGE Match the GUI trace dashboard on one page.
+
+    nPanels = numel(indices);
+    nColumns = 2;
+    nRows = ceil(nPanels/nColumns);
+    pageW = max(9,min(0.95*double(figW),12));
+    pageH = max(6.5,min(0.95*double(figH),8.5));
+    clf(figTrace);
+    set(figTrace,'Units','inches', ...
+        'Position',[0.1 0.1 pageW pageH], ...
+        'NumberTitle','off','Color','w', ...
+        'Name',sprintf('%s: Parameter traces %d/%d', ...
+        modelName,page,nPages));
+    setappdata(figTrace,'SAGETracePage',page);
+    setappdata(figTrace,'SAGEExportOrder',11+(page-1)/100);
+    setappdata(figTrace,'SAGEPreserveCaptureSize',true);
+
+    leftMargin = 0.095;
+    rightMargin = 0.035;
+    topMargin = 0.085;
+    bottomMargin = 0.105;
+    columnGap = 0.135;
+    rowGap = 0.035;
+    axesWidth = (1-leftMargin-rightMargin-columnGap)/2;
+    axesHeight = (1-topMargin-bottomMargin-(nRows-1)*rowGap)/nRows;
+    xmax = x(end);
+    xticksPage = local_trace_xticks(xmax);
+
+    for localIndex = 1:nPanels
+        parameterIndex = indices(localIndex);
+        row = ceil(localIndex/nColumns);
+        column = mod(localIndex-1,nColumns)+1;
+        left = leftMargin+(column-1)*(axesWidth+columnGap);
+        bottom = 1-topMargin-row*axesHeight-(row-1)*rowGap;
+        ax = axes(figTrace,'Position', ...
+            [left bottom axesWidth axesHeight]);
+        hold(ax,'on');
+
+        Q = reshape(tTheta(:,parameterIndex,:),size(tTheta,1),7);
+        if pspace == 0
+            [minimum,maximum] = ...
+                local_trace_param_bounds(mdl,parameterIndex);
+            if isfinite(minimum) && isfinite(maximum)
+                Q = minimum+Q.*(maximum-minimum);
+            end
+        end
+        good = isfinite(Q(:,4));
+        xx = x(good);
+        Q = Q(good,:);
+        if isempty(xx)
             continue
         end
-        if mod(j,2) == 0
-            ylh(j).Position(1) = ...
-                ylh(j).Position(1) + 0.12;
-        else
-            ylh(j).Position(1) = ...
-                ylh(j).Position(1) - 0.04;
-        end
-    end
-    
-    % -----
-    % Title
-    % -----
-    ttl = strrep(model_name_fig,'_','\_');
-    annotation(figTrace,'textbox',[0 0.96 1 0.03], ...
-        'String',sprintf(['$\\texttt{%s}$: ' ...
-        'Parameter trace summary'],ttl), ...
-        'interpreter','latex', ...
-        'fontsize',16, ...
-        'horizontalalignment','center', ...
-        'verticalalignment','bottom', ...
-        'EdgeColor','none');
 
+        fill(ax,[xx;flipud(xx)],[Q(:,1);flipud(Q(:,7))], ...
+            [0.90 0.90 0.90],'EdgeColor','none','FaceAlpha',0.70);
+        fill(ax,[xx;flipud(xx)],[Q(:,2);flipud(Q(:,6))], ...
+            [0.74 0.74 0.74],'EdgeColor','none','FaceAlpha',0.70);
+        fill(ax,[xx;flipud(xx)],[Q(:,3);flipud(Q(:,5))], ...
+            [0.56 0.56 0.56],'EdgeColor','none','FaceAlpha',0.70);
+        plot(ax,xx,Q(:,4),'k-','LineWidth',1.8);
+
+        if pspace == 1
+            ylim(ax,[-0.1 1.1]);
+            ax.YTick = [0 1];
+            ax.YTickLabel = {'0','1'};
+            plot(ax,[1 xmax],[0 0],'r--','LineWidth',1);
+            plot(ax,[1 xmax],[1 1],'r--','LineWidth',1);
+        else
+            [minimum,maximum] = ...
+                local_trace_param_bounds(mdl,parameterIndex);
+            if isfinite(minimum) && isfinite(maximum)
+                lo = min(minimum,maximum);
+                hi = max(minimum,maximum);
+                padding = 0.10*(hi-lo);
+                if ~isfinite(padding) || padding <= 0
+                    padding = max(1e-8,0.10*max(abs([lo hi])));
+                end
+                ylim(ax,[lo-padding hi+padding]);
+                ax.YTick = [minimum maximum];
+                plot(ax,[1 xmax],[minimum minimum],'r--','LineWidth',1);
+                plot(ax,[1 xmax],[maximum maximum],'r--','LineWidth',1);
+            end
+        end
+
+        xlim(ax,[1 xmax]);
+        set(ax,'Box','off','TickDir','out','TickLength',[0.018 0.018], ...
+            'FontName','Arial','FontSize',12,'LineWidth',1, ...
+            'Layer','top','XTick',xticksPage, ...
+            'XTickLabelRotation',0,'XMinorTick','off','YMinorTick','off');
+        grid(ax,'off');
+
+        occupiedInColumn = column:nColumns:nPanels;
+        isBottomInColumn = localIndex == occupiedInColumn(end);
+        if isBottomInColumn
+            ax.XTickLabel = string(xticksPage);
+            xlabel(ax,'SAGE iteration, $i$', ...
+                'Interpreter','latex','FontSize',13);
+        else
+            ax.XTickLabel = [];
+        end
+        ylabel(ax,trace_ylabel_general(mdl,parameterIndex,pspace), ...
+            'Interpreter','latex','FontSize',13);
+        local_draw_top_right_box(ax);
+        hold(ax,'off');
+    end
+
+    annotation(figTrace,'textbox',[0.01 0.955 0.98 0.035], ...
+        'String','Median and 50/70/90% bands across training basins.', ...
+        'Interpreter','none','FontName','Arial','FontSize',12, ...
+        'HorizontalAlignment','left','VerticalAlignment','middle', ...
+        'EdgeColor','none');
 end
 
 function xt = local_trace_xticks(n)
@@ -2248,7 +2213,7 @@ function [thmin,thmax] = local_trace_param_bounds(mdl,j)
     end
 end
 
-function local_panel_label(ax,j,fs)
+function local_panel_label(ax,j,fs) %#ok<DEFNU>
 %LOCAL_PANEL_LABEL Panel label: (a), (b), ..., (z), (aa), ...
 
     xl = xlim(ax);
@@ -2342,7 +2307,7 @@ function local_draw_top_right_box(ax)
         'clipping','off');
 end
 
-function local_align_ylabels(axs)
+function local_align_ylabels(axs) %#ok<DEFNU>
 %LOCAL_ALIGN_YLABELS Align y-labels for a vector of axes handles
 
     axs = axs(isgraphics(axs));
@@ -2474,10 +2439,14 @@ function plot_parameter_maps_figure(figNo, ...
         region,lat,lon);
     
     [nrow,ncol] = local_parameter_map_layout(d);
+    if isfield(mdl,'map_parameter_indices')
+        ncol=min(5,d);
+        nrow=ceil(d/ncol);
+    end
     
     % wider than tall, but not too wide
     figW = min(0.98*figW,16.3);                 % fixed width for all models
-    figH = min(0.925*figH,3.0 + 2.45*nrow);     % calibrated from Xinanjiang template
+    figH = 2.0 + 2.0*nrow;
     
     figure(figNo); clf;
     set(gcf,'Name',sprintf(['%s: ' ...
@@ -2491,7 +2460,7 @@ function plot_parameter_maps_figure(figNo, ...
     left = 0.025;
     right = 0.020;
     top = 0.055;
-    bottom = 0.075;
+    bottom = 0.15;
 
     hgap = 0.006;
     vgap = 0.012;
@@ -2501,8 +2470,9 @@ function plot_parameter_maps_figure(figNo, ...
     panelH = (1 - bottom - top - ...
         (nrow-1)*vgap)/nrow;
     
-    blueBase = [0 0.4470 0.7410];
-    orangeBase = [0.8500 0.3250 0.0980];
+    visualTheme = sage_visual_theme();
+    blueBase = visualTheme.colors.basin.training;
+    orangeBase = visualTheme.colors.basin.evaluation;
     
     % Line 2783-2784: change marker sizes
     msT = 20;   % was 65
@@ -2657,15 +2627,19 @@ function plot_parameter_maps_figure(figNo, ...
     
         % Combine the panel letter and parameter symbol in one fixed
         % top-left label so that screen scaling cannot separate them.
+        parameterIndex=j;
+        if isfield(mdl,'map_parameter_indices')
+            parameterIndex=mdl.map_parameter_indices(j);
+        end
         panelText = sprintf('%s %s', ...
             local_panel_label_string(j), ...
-            trace_ylabel_general(mdl,j,1));
+            trace_ylabel_general(mdl,parameterIndex,1));
         annotation('textbox', ...
             [x0 + 0.01*panelW, y0 + 0.90*panelH, ...
-            0.52*panelW, 0.08*panelH], ...
+            0.95*panelW, 0.12*panelH], ...
         'String',panelText, ...
         'interpreter','latex', ...
-        'fontsize',18, ...
+        'fontsize',12, ...
         'EdgeColor','none', ...
         'horizontalalignment','left', ...
         'verticalalignment','top');
@@ -2692,16 +2666,7 @@ function plot_parameter_maps_figure(figNo, ...
         'verticalalignment','middle', ...
         'fontsize',18);
     
-    nEmpty = nrow*ncol - d;
-    if nEmpty >= 2
-        local_add_parameter_colorbar_in_grid( ...
-            figNo,blueBase, ...
-            left,hgap,vgap, ...
-            panelW,panelH,nrow,ncol,d);
-    else
-        local_add_parameter_colorbar( ...
-            figNo,blueBase);
-    end
+    local_add_parameter_colorbar(figNo,blueBase);
 
 end
 
@@ -2713,7 +2678,7 @@ function local_add_parameter_colorbar(figNo,blueBase)
     cbH = 0.018;
     cbW = 0.42;
     cbX = 0.5 - cbW/2;
-    cbY = 0.055;
+    cbY = 0.085;
 
     n = 256;
     v = linspace(0,1,n);
@@ -2753,7 +2718,7 @@ function local_add_parameter_colorbar(figNo,blueBase)
     ax1.XRuler.TickLabelGapOffset = -3;
     hx1 = xlabel(ax1,'normalized parameter value', ...
         'fontname','Calibri', ...
-        'fontsize',21);    
+        'fontsize',16);    
     hx1.Units = 'normalized';
     hx1.Position(2) = -0.75;
 
@@ -3603,8 +3568,7 @@ function [npairs,VG] = plot_parameter_variograms_figure(figNo, ...
             local_plain_label(mdl,j);
             % Normalized parameter label:
         % underline the main parameter symbol, but do not print subscripts.
-        label_latex{j} = ...
-            local_variogram_label_normalized_latex(mdl,j);
+        label_latex{j} = trace_ylabel_general(mdl,j,1);
     end
     
     VG = struct();
@@ -3618,18 +3582,6 @@ function [npairs,VG] = plot_parameter_variograms_figure(figNo, ...
     VG.label_plain = label_plain;
     VG.label_latex = label_latex;
     VG.hmax_fit = hmax_fit;
-    
-    % ------
-    % Figure
-    % ------   
-    figure(figNo); clf;
-    set(gcf, ...
-        'Name',sprintf('%s: Parameter variograms', ...
-        model_name_fig), ...
-        'NumberTitle','off', ...
-        'Color','w', ...
-        'Units','inches', ...
-        'Position',[0.4 0.4 10.5 9.5]);
     
     % Use the regional fit cutoff also as the plotted x-axis cutoff.
     % Example: Germany hmax_fit = 600 km -> x-axis [0 600].
@@ -3650,171 +3602,132 @@ function [npairs,VG] = plot_parameter_variograms_figure(figNo, ...
     % (for example 0, 1000, 1200) and overlapping endpoint labels.
     maxXTicks = 6;
     [xt,xtlbl] = local_variogram_xticks(xmaxPlot,maxXTicks);
-    % ---- manual layout ----
-    if d <= 12
-        ncol = 3;
-    else
-        ncol = 4;
-    end
-    nrow = ceil(d/ncol);
-
-    figW = 17.0;
-    figH = 9.0;
-
-    figure(figNo); clf;
-    set(gcf,'Name',sprintf('%s: Parameter variograms', ...
-        model_name_fig), ...
-        'NumberTitle','off', ...
-        'Color','w', ...
-        'Units','inches', ...
-        'Position',[0.6 0.6 figW figH]);
-
-    fig = gcf;
-    ttl = strrep(char(string(model_name_fig)),'_','\_');
-    annotation(fig,'textbox',[0.00 0.955 1.00 0.035], ...
-        'String',sprintf(['$\\texttt{%s}$: Variograms of final ' ...
-        'normalized parameter values'],ttl), ...
-        'Interpreter','latex', ...
-        'FontSize',20, ...
-        'FontWeight','bold', ...
-        'EdgeColor','none', ...
-        'HorizontalAlignment','center', ...
-        'VerticalAlignment','middle');
-
-    left = 0.080;
-    right = 0.050;
-    bottom = 0.1;
-
-    top = 0.125;
-
-    % Keep sufficient separation for neighboring y labels and for the
-    % titles/x labels of vertically adjacent variogram panels.
-    hgap = 0.085;
-    vgap = 0.065;
-
-    panelW = (1-left-right-(ncol-1)*hgap)/ncol;
-    panelH = (1-bottom-top-(nrow-1)*vgap)/nrow;
-
-    % A region-specific tick interval is useful only while its labels fit.
-    % Thin the common tick set using the actual on-screen subplot width so
-    % four-column figures remain readable on narrower laptop displays.
-    maxXTicksFit = local_variogram_max_xticks( ...
-        fig,panelW,15,xmaxPlot);
-    if numel(xt) > maxXTicksFit
-        [xt,xtlbl] = local_variogram_xticks( ...
-            xmaxPlot,maxXTicksFit);
-    end
-
-    for j = 1:d
-
-        row = ceil(j/ncol);
-        col = mod(j-1,ncol) + 1;
-        
-        x0 = left + (col-1)*(panelW+hgap);
-        y0 = 1 - top - row*panelH - (row-1)*vgap;
-        
-        ax = axes('Units','normalized', ...
-            'Position',[x0 y0 panelW panelH]);
-        hold(ax,'on');
-        box(ax,'on');
-    
-        gj = gamma(j,:);
-    
-        YS = local_variogram_axis_scale( ...
-            gj,fitOK(j),fitPar(j,:),hmax_fit, ...
-            @local_spherical_variogram);
-        
-        scaleFac = YS.scaleFac;
-
-        good = isfinite(gj) ...
-            & isfinite(binCenter) ...
-            & (npairs > 0) ...
-            & (binCenter <= hmax_fit);
-    
-        % empirical variogram
-        if any(good)
-            plot(ax,binCenter(good),scaleFac*gj(good), ...
-                's', ...
-                'Color',colors(j,:), ...
-                'MarkerFaceColor',colors(j,:), ...
-                'MarkerEdgeColor',colors(j,:), ...
-                'MarkerSize',5, ...
-                'LineWidth',1.0);
+    % Remove variogram pages left by an earlier call without touching the
+    % SITE variogram figure or any other plot_SAGE result figures.
+    oldFigures = findall(groot,'Type','figure');
+    for k = 1:numel(oldFigures)
+        try
+            if isappdata(oldFigures(k),'SAGEVariogramPage')
+                close(oldFigures(k));
+            end
+        catch
         end
-    
-        % fitted spherical curve
-        if fitOK(j)
-            hfit = linspace(0,hmax_fit,400);
-            gfit = local_spherical_variogram(hfit,fitPar(j,:));
+    end
 
-            plot(ax,hfit,scaleFac*gfit, ...
-                '-', ...
-                'Color',colors(j,:), ...
-                'LineWidth',2.0);
+    perPage = 10;
+    nPages = ceil(d/perPage);
+    for page = 1:nPages
+        first = (page-1)*perPage+1;
+        last = min(d,page*perPage);
+        if page == 1
+            pageFigure = figure(figNo);
+        else
+            pageFigure = figure(figNo+2000+page);
+        end
+        local_plot_parameter_variogram_page(pageFigure,first:last, ...
+            gamma,binCenter,npairs,fitOK,fitPar,hmax_fit,xmaxPlot, ...
+            xt,xtlbl,colors,label_latex,model_name_fig,page,nPages);
+    end
+end
+
+function local_plot_parameter_variogram_page(fig,indices,gamma, ...
+        binCenter,npairs,fitOK,fitPar,hmaxFit,xmaxPlot,xt,xtlbl, ...
+        colors,labelLatex,modelName,page,nPages)
+%LOCAL_PLOT_PARAMETER_VARIOGRAM_PAGE Render at most ten panels in 5x2.
+
+    nPanels = numel(indices);
+    nColumns = 2;
+    nRows = ceil(nPanels/nColumns);
+    clf(fig);
+    set(fig,'Name',sprintf('%s: Parameter variograms %d/%d', ...
+        modelName,page,nPages),'NumberTitle','off','Color','w', ...
+        'Units','inches','Position',[0.6 0.6 11.5 8.5]);
+    setappdata(fig,'SAGEFigureFamily','variogram');
+    setappdata(fig,'SAGEVariogramPage',page);
+    setappdata(fig,'SAGEExportOrder',13+(page-1)/100);
+    setappdata(fig,'SAGEPreserveCaptureSize',true);
+
+    leftMargin = 0.090;
+    rightMargin = 0.035;
+    topMargin = 0.070;
+    bottomMargin = 0.090;
+    columnGap = 0.135;
+    rowGap = 0.035;
+    panelWidth = (1-leftMargin-rightMargin-columnGap)/2;
+    panelHeight = ...
+        (1-topMargin-bottomMargin-(nRows-1)*rowGap)/nRows;
+
+    maxTicks = local_variogram_max_xticks(fig,panelWidth,13,xmaxPlot);
+    if numel(xt) > maxTicks
+        [xt,xtlbl] = local_variogram_xticks(xmaxPlot,maxTicks);
+    end
+
+    for localIndex = 1:nPanels
+        parameterIndex = indices(localIndex);
+        row = ceil(localIndex/nColumns);
+        column = mod(localIndex-1,nColumns)+1;
+        left = leftMargin+(column-1)*(panelWidth+columnGap);
+        bottom = 1-topMargin-row*panelHeight-(row-1)*rowGap;
+        ax = axes(fig,'Units','normalized','Position', ...
+            [left bottom panelWidth panelHeight]);
+        hold(ax,'on');
+
+        gj = gamma(parameterIndex,:);
+        YS = local_variogram_axis_scale(gj,fitOK(parameterIndex), ...
+            fitPar(parameterIndex,:),hmaxFit,@local_spherical_variogram);
+        good = isfinite(gj) & isfinite(binCenter) & (npairs > 0) ...
+            & (binCenter <= hmaxFit);
+        if any(good)
+            plot(ax,binCenter(good),YS.scaleFac*gj(good),'s', ...
+                'Color',colors(parameterIndex,:), ...
+                'MarkerFaceColor',colors(parameterIndex,:), ...
+                'MarkerEdgeColor',colors(parameterIndex,:), ...
+                'MarkerSize',5,'LineWidth',1);
+        end
+        if fitOK(parameterIndex)
+            hfit = linspace(0,hmaxFit,400);
+            gfit = local_spherical_variogram( ...
+                hfit,fitPar(parameterIndex,:));
+            plot(ax,hfit,YS.scaleFac*gfit,'-', ...
+                'Color',colors(parameterIndex,:),'LineWidth',2);
         end
 
         xlim(ax,[0 xmaxPlot]);
+        ylim(ax,YS.ylim);
         xticks(ax,xt);
-        
-        set(ax, ...
-            'TickDir','out', ...
-            'FontSize',15, ...
-            'LineWidth',1, ...
-            'TickLabelInterpreter','latex');
-        ax.XRuler.TickLabelGapOffset = -2;
-        ax.XTickLabelRotation = 0;
-        
-        isBottomPanel = (j > d - ncol);
+        yticks(ax,YS.yticks);
+        yticklabels(ax,YS.yticklabels);
+        set(ax,'Box','off','TickDir','out','TickLength',[0.018 0.018], ...
+            'FontName','Arial','FontSize',12,'LineWidth',1,'Layer','top', ...
+            'TickLabelInterpreter','latex','XTickLabelRotation',0);
 
-        if isBottomPanel
+        occupiedInColumn = column:nColumns:nPanels;
+        isBottomInColumn = localIndex == occupiedInColumn(end);
+        if isBottomInColumn
             xticklabels(ax,xtlbl);
             xlabel(ax,'Lag distance, $h$ (km)', ...
-                'Interpreter','latex', ...
-                'FontSize',16);
+                'Interpreter','latex','FontSize',13);
         else
             xticklabels(ax,repmat({''},size(xt)));
         end
-    
-        % only left column gets y-label
-        % y-label for every panel
-        ylab = YS.ylabelLatex;
-        
-        axpos = ax.Position;
-        xlabpos = axpos(1) - 0.045;
-        
-        annotation('textbox', ...
-            [xlabpos axpos(2)+0.4*axpos(4) 0.035 0.001*axpos(4)], ...
-            'String',ylab, ...
-            'Interpreter','latex', ...
-            'FontSize',15, ...
-            'EdgeColor','none', ...
-            'HorizontalAlignment','center', ...
-            'VerticalAlignment','middle', ...
-            'Rotation',90);
+        ylabel(ax,YS.ylabelLatex,'Interpreter','latex','FontSize',13);
 
-        % scaled y-limits
-        ylim(ax,YS.ylim);
-        yticks(ax,YS.yticks);
-        yticklabels(ax,YS.yticklabels);
-
-        panelStr = sprintf('%s %s', ...
-            local_panel_label_string(j),label_latex{j});
-
-        text(ax,0.01,1.03,panelStr, ...
-            'Units','normalized', ...
-            'Interpreter','latex', ...
-            'FontSize',16, ...
-            'FontWeight','bold', ...
-            'HorizontalAlignment','left', ...
-            'VerticalAlignment','top');
-        box(ax,'off');
-        set(ax,...
-            'TickDir','out',...
-            'TickLength',[0.03 0.015], ...
-            'XAxisLocation','bottom',...
-            'YAxisLocation','left',...
-            'LineWidth',1.0);
+        % Do not embed a dollar-delimited label inside another LaTeX
+        % string: that was the source of the earlier SceneNode warnings.
+        symbol = strrep(labelLatex{parameterIndex},'$','');
+        panelString = sprintf('$\\mathrm{%s}\\; %s$', ...
+            local_panel_label_string(parameterIndex),symbol);
+        text(ax,0.02,0.97,panelString,'Units','normalized', ...
+            'Interpreter','latex','FontSize',12,'FontWeight','bold', ...
+            'HorizontalAlignment','left','VerticalAlignment','top');
+        hold(ax,'off');
     end
+
+    annotation(fig,'textbox',[0.01 0.955 0.98 0.035], ...
+        'String',sprintf(['Variograms of final normalized parameter ' ...
+        'values (%d/%d).'],page,nPages),'Interpreter','none', ...
+        'FontName','Arial','FontSize',12,'HorizontalAlignment','left', ...
+        'VerticalAlignment','middle','EdgeColor','none');
 end
 
 % ======================
@@ -3969,10 +3882,14 @@ function [mainSym,subSym] = local_split_symbol(p)
             s = '\delta'; return
         case 'epsilon'
             s = '\epsilon'; return
+        case 'eta'
+            s = '\eta'; return
         case 'lambda'
             s = '\lambda'; return
         case 'omega'
             s = '\omega'; return
+        case 'tau'
+            s = '\tau'; return
         case 'theta'
             s = '\theta'; return
         case 'phi'
@@ -4405,46 +4322,6 @@ function step2 = local_next_distance_step(step)
     else
         step2 = niceFractions(k) * 10^exponent;
     end
-end
-
-function s = local_variogram_label_normalized_latex(mdl,j)
-%LOCAL_VARIROGRAM_LABEL_NORMALIZED_LATEX Normalized parameter label.
-%
-% Underlines the main parameter symbol and preserves the subscript.
-%
-% Examples:
-%   s_tot   -> \underline{s}_{\rm tot}
-%   k_s     -> \underline{k}_{\rm s}
-%   sf_cf   -> \underline{\rm sf}_{\rm cf}
-%   alpha   -> \underline{\alpha}
-
-    pname = '';
-
-    try
-        if isfield(mdl,'par_names') ...
-                && numel(mdl.par_names) >= j
-            if iscell(mdl.par_names)
-                pname = char(string(mdl.par_names{j}));
-            else
-                pname = char(string(mdl.par_names(j)));
-            end
-        end
-    catch
-    end
-
-    if isempty(pname)
-        s = sprintf('$\\underline{\\theta}_{%d}$',j);
-        return
-    end
-
-    [mainSym,subSym] = local_split_symbol(pname);
-
-    if isempty(subSym)
-        s = ['$\underline{' mainSym '}$'];
-    else
-        s = ['$\underline{' mainSym '}_{' subSym '}$'];
-    end
-
 end
 
 function VG = plot_parameter_variograms_SITE_figure( ...
@@ -4915,6 +4792,7 @@ function local_plot_timeseries_postprocessor( ...
 %   - otherwise use colored observation markers
 %   - force point-style for pure random sampling
 
+    visualTheme = sage_visual_theme();
     K_t = bas.K_t;
     K_e = bas.K_e;
     showForcingPanels = local_show_forcing_panels();
@@ -4988,6 +4866,7 @@ function local_plot_timeseries_postprocessor( ...
         for jf = 1:nFig
             f = figure(figBase);
             clf(f,'reset');
+            setappdata(f,'SAGEFigureFamily','timeseries');
             figBase = figBase + 1;
     
             nThisFig = min(nPerFig, ...
@@ -5125,16 +5004,23 @@ function local_plot_timeseries_postprocessor( ...
 
             goodAx = axh(isgraphics(axh));
             set(goodAx, ...
+                'FontName',visualTheme.plots.fontName, ...
+                'XColor',visualTheme.plots.axisColor, ...
+                'YColor',visualTheme.plots.axisColor, ...
+                'LineWidth',visualTheme.plots.axisLineWidth, ...
                 'tickdir','out', ...
-                'TickLength',[0.004 0.004], ...
-                'fontsize',13);
+                'TickLength',[0.003 0.003], ...
+                'fontsize',visualTheme.plots.tickSize);
 
             if showForcingPanels
                 goodForcing = axForcing(isgraphics(axForcing));
             set(goodForcing, ...
+                'FontName',visualTheme.plots.fontName, ...
+                'XColor',visualTheme.plots.axisColor, ...
+                'LineWidth',visualTheme.plots.axisLineWidth, ...
                 'tickdir','out', ...
-                'TickLength',[0.004 0.004], ...
-                'fontsize',13);
+                'TickLength',[0.003 0.003], ...
+                'fontsize',visualTheme.plots.tickSize);
                 goodTemperature = axTemperature( ...
                     isgraphics(axTemperature));
                 set(goodTemperature, ...
@@ -5173,6 +5059,7 @@ function local_plot_timeseries_postprocessor( ...
                     'Location','northeast', ...
                     'interpreter','latex', ...
                     'fontsize',fontsize_legend, ...
+                    'FontName',visualTheme.plots.fontName, ...
                     'box','off');
             end
     
@@ -5202,8 +5089,9 @@ function local_plot_basin_postprocessor(axh, ...
     cShadeEval,face_alpha,marker_alpha)
 %LOCAL_PLOT_BASIN_POSTPROCESSOR Plots discharge for one basin and scenario.
 
-    fontsize_axis = 18;
-    lw_sim = 1.25;
+    visualTheme = sage_visual_theme();
+    fontsize_axis = visualTheme.plots.labelSize;
+    lw_sim = visualTheme.plots.modelLineWidth;
     
     cObsEdge = [0 0 0]; %#ok
     
@@ -5346,7 +5234,7 @@ function local_plot_basin_postprocessor(axh, ...
         % observations as open filled circles
         if ~isempty(xT_plot)
             scatter(axh,xT_plot,y(xT_plot), ...
-                6, ...
+                visualTheme.plots.observationSize, ...
                 cPtTrain, ...
                 'filled', ...
                 'MarkerFaceAlpha',marker_alpha, ...
@@ -5356,7 +5244,7 @@ function local_plot_basin_postprocessor(axh, ...
     
         if ~isempty(xE_plot)
             scatter(axh,xE_plot,y(xE_plot), ...
-                6, ...
+                visualTheme.plots.observationSize, ...
                 cPtEval, ...
                 'filled', ...
                 'MarkerFaceAlpha',marker_alpha, ...
@@ -5368,7 +5256,7 @@ function local_plot_basin_postprocessor(axh, ...
         % no shading -> use colored obs points
         if ~isempty(xT_plot)
             scatter(axh,xT_plot,y(xT_plot), ...
-                6, ...
+                visualTheme.plots.observationSize, ...
                 cPtTrain, ...
                 'filled', ...
                 'MarkerFaceAlpha',marker_alpha, ...
@@ -5378,7 +5266,7 @@ function local_plot_basin_postprocessor(axh, ...
     
         if ~isempty(xE_plot)
             scatter(axh,xE_plot,y(xE_plot), ...
-                6, ...
+                visualTheme.plots.observationSize, ...
                 cPtEval, ...
                 'filled', ...
                 'MarkerFaceAlpha',marker_alpha, ...
@@ -5448,10 +5336,12 @@ function local_plot_basin_postprocessor(axh, ...
             local_set_date_ticks_fourgroups( ...
                 axh,'tt',prd,idx_all,xmin,xmax);
             set(axh,'XTickLabelRotation',0, ...
-                'fontsize',13);
+                'fontsize',visualTheme.plots.tickSize, ...
+                'FontName',visualTheme.plots.fontName);
             xlabel(axh,'Date', ...
                 'interpreter','latex', ...
-                'fontsize',18);
+                'fontsize',visualTheme.plots.labelSize, ...
+                'FontWeight',visualTheme.plots.labelWeight);
         end
     else
         local_set_integer_ticks(axh,x1,x2);
@@ -5505,6 +5395,8 @@ function local_plot_forcing_postprocessor( ...
     sp_method,cShadeTrain,cShadeEval,face_alpha)
 %LOCAL_PLOT_FORCING_POSTPROCESSOR Plot precipitation and PET above Q.
 
+    visualTheme = sage_visual_theme();
+
     if ~isfield(datk,'meteo') ...
             || ~isstruct(datk.meteo) ...
             || ~isfield(datk.meteo,'P')
@@ -5556,14 +5448,14 @@ function local_plot_forcing_postprocessor( ...
     useShading = local_should_use_shading( ...
         sp_method,xT,xE,30);
 
-    cP = [0 0 1];
-    cEp = [0.46 0.55 0.89];
+    cP = visualTheme.colors.forcing.precipitation;
+    cEp = visualTheme.colors.forcing.potentialEvapotranspiration;
 
     yyaxis(axh,'left');
     bar(axh,x,P,1, ...
         'FaceColor',cP, ...
         'EdgeColor',cP, ...
-        'LineWidth',0.15, ...
+        'LineWidth',visualTheme.plots.precipitationLineWidth, ...
         'HandleVisibility','off');
     local_set_nonnegative_ylim(axh,P(idx));
     ylP = ylim(axh);
@@ -5578,19 +5470,22 @@ function local_plot_forcing_postprocessor( ...
         end
     end
     local_fixed_left_axis_label(axh,sprintf('$P$ (%s)',forcingUnit), ...
-        cP,18,60);
-    axh.YAxis(1).Color = cP;
+        cP,visualTheme.plots.labelSize,60);
+    axh.YAxis(1).Color = visualTheme.plots.axisColor;
+    axh.YAxis(1).Label.Color = cP;
 
     yyaxis(axh,'right');
     plot(axh,x,Ep, ...
         'Color',cEp, ...
-        'LineWidth',0.5, ...
+        'LineWidth',visualTheme.plots.evapotranspirationLineWidth, ...
         'HandleVisibility','off');
     ylabel(axh,sprintf('$E_{\\rm p}$ (%s)',forcingUnit), ...
         'Interpreter','latex', ...
-        'FontSize',18, ...
+        'FontSize',visualTheme.plots.labelSize, ...
+        'FontWeight',visualTheme.plots.labelWeight, ...
         'Color',cEp);
-    axh.YAxis(2).Color = cEp;
+    axh.YAxis(2).Color = visualTheme.plots.axisColor;
+    axh.YAxis(2).Label.Color = cEp;
     local_set_nonnegative_ylim(axh,Ep(idx));
     axh.YAxis(2).Direction = 'reverse';
 
@@ -5606,6 +5501,7 @@ function local_plot_temperature_strip( ...
     cShadeTrain,cShadeEval,faceAlpha,qXLim,axisLineWidth)
 %LOCAL_PLOT_TEMPERATURE_STRIP Mark time steps below freezing.
 
+    visualTheme = sage_visual_theme();
     hold(axh,'on');
     xlim(axh,qXLim);
     ylim(axh,[0 1]);
@@ -5654,9 +5550,10 @@ function local_plot_temperature_strip( ...
         'YLim',[0 1], ...
         'XTick',[], ...
         'YTick',[], ...
-        'XColor','k', ...
-        'YColor','k', ...
-        'LineWidth',axisLineWidth, ...
+        'FontName',visualTheme.plots.fontName, ...
+        'XColor',visualTheme.plots.axisColor, ...
+        'YColor',visualTheme.plots.axisColor, ...
+        'LineWidth',min(axisLineWidth,visualTheme.plots.axisLineWidth), ...
         'Box','on', ...
         'Layer','top');
 
@@ -5665,10 +5562,11 @@ function local_plot_temperature_strip( ...
         'Rotation',0, ...
         'HorizontalAlignment','right', ...
         'VerticalAlignment','middle', ...
-        'FontSize',14, ...
-        'Color','k');
+        'FontSize',max(11,visualTheme.plots.labelSize-2), ...
+        'FontWeight',visualTheme.plots.labelWeight, ...
+        'Color',visualTheme.plots.axisColor);
     hY.Units = 'normalized';
-    hY.Position = [-0.020 0.5 0];
+    hY.Position = [-0.040 0.5 0];
 end
 
 function [pF,pT,pQ] = local_timeseries_axes_positions( ...
@@ -5701,10 +5599,10 @@ function [pF,pT,pQ] = local_timeseries_axes_positions( ...
     % Reduce the equal clearances above and below the temperature strip
     % to 60% of their former size. Split the recovered height equally
     % between the forcing and discharge panels.
-    forcingHeight = 0.322*groupHeight;
-    dischargeHeight = 0.582*groupHeight;
+    forcingHeight = 0.315*groupHeight;
+    dischargeHeight = 0.570*groupHeight;
     interPanelGap = groupHeight-forcingHeight-dischargeHeight;
-    temperatureHeight = 0.030*groupHeight;
+    temperatureHeight = 0.045*groupHeight;
     temperatureBottom = y+dischargeHeight ...
         + 0.5*(interPanelGap-temperatureHeight);
 
@@ -5717,10 +5615,13 @@ end
 function local_timeseries_figure_title(f,titleText)
 %LOCAL_TIMESERIES_FIGURE_TITLE Add a stable figure-level title.
 
+    visualTheme = sage_visual_theme();
     annotation(f,'textbox',[0.02 0.955 0.96 0.035], ...
         'String',titleText, ...
         'Interpreter','latex', ...
-        'FontSize',17, ...
+        'FontName',visualTheme.plots.fontName, ...
+        'FontSize',visualTheme.plots.titleSize, ...
+        'FontWeight',visualTheme.plots.titleWeight, ...
         'HorizontalAlignment','center', ...
         'VerticalAlignment','middle', ...
         'EdgeColor','none', ...
@@ -5789,22 +5690,27 @@ function local_position_timeseries_ylabels( ...
         labelOffsetPixels = 60;
     end
 
+    visualTheme = sage_visual_theme();
     if isgraphics(axForcing)
         label = findobj(axForcing,'Type','text', ...
             'Tag','SAGEFixedLeftYLabel');
         if ~isempty(label)
             p = getpixelposition(axForcing,false);
             set(label,'Units','pixels', ...
-                'FontSize',18, ...
+                'FontName',visualTheme.plots.fontName, ...
+                'FontSize',visualTheme.plots.labelSize, ...
+                'FontWeight',visualTheme.plots.labelWeight, ...
                 'Position',[-abs(labelOffsetPixels) 0.5*p(4)-3 0]);
         end
         try
             % SET(ax,'FontSize',...) is called after YYAXIS is created and
             % also shrinks the right-hand ylabel. Restore both rulers and
             % the E_p label only after all axes formatting is complete.
-            axForcing.YAxis(1).FontSize = 13;
-            axForcing.YAxis(2).FontSize = 13;
-            axForcing.YAxis(2).Label.FontSize = 18;
+            axForcing.YAxis(1).FontSize = visualTheme.plots.tickSize;
+            axForcing.YAxis(2).FontSize = visualTheme.plots.tickSize;
+            axForcing.YAxis(2).Label.FontSize = visualTheme.plots.labelSize;
+            axForcing.YAxis(2).Label.FontWeight = ...
+                visualTheme.plots.labelWeight;
         catch
         end
     end
@@ -5814,7 +5720,9 @@ function local_position_timeseries_ylabels( ...
         if ~isempty(label)
             p = getpixelposition(axDischarge,false);
             set(label,'Units','pixels', ...
-                'FontSize',18, ...
+                'FontName',visualTheme.plots.fontName, ...
+                'FontSize',visualTheme.plots.labelSize, ...
+                'FontWeight',visualTheme.plots.labelWeight, ...
                 'Position',[-abs(labelOffsetPixels) 0.5*p(4)-3 0]);
         end
     end
@@ -5896,6 +5804,7 @@ function [hLeg,lblLeg] = ...
     cPtTrain,cPtEval,model_names)
 % LOCAL_MAKE_POSTPROC_LEGEND
 
+    visualTheme = sage_visual_theme();
     hLeg = gobjects(0);
     lblLeg = {};
     
@@ -5908,7 +5817,7 @@ function [hLeg,lblLeg] = ...
     
         h = plot(axh,nan,nan,'-', ...
             'color',c, ...
-            'linewidth',2.5);
+            'linewidth',visualTheme.plots.modelLineWidth);
         hLeg(end+1) = h;            %#ok
     
         name_i = local_model_plot_name(model_names, ...
@@ -5922,8 +5831,8 @@ function [hLeg,lblLeg] = ...
     h = plot(axh,nan,nan,'o', ...
         'MarkerFaceColor',cPtTrain, ...
         'MarkerEdgeColor',cPtTrain, ...
-        'markersize',6, ...
-        'linewidth',1.4, ...
+        'markersize',4, ...
+        'linewidth',visualTheme.plots.axisLineWidth, ...
         'linestyle','none');
     hLeg(end+1) = h;
     lblLeg{end+1} = '$\ \mathrm{training\; data}$';
@@ -5932,8 +5841,8 @@ function [hLeg,lblLeg] = ...
     h = plot(axh,nan,nan,'o', ...
         'MarkerFaceColor',cPtEval, ...
         'MarkerEdgeColor',cPtEval, ...
-        'markersize',6, ...
-        'linewidth',1.4, ...
+        'markersize',4, ...
+        'linewidth',visualTheme.plots.axisLineWidth, ...
         'linestyle','none');
     hLeg(end+1) = h;
     lblLeg{end+1} = '$\ \mathrm{evaluation\; data}$';
@@ -6061,6 +5970,7 @@ function hfig = local_plot_paper_hydrograph(cfg,mdl,dat,bas,prd,Q, ...
 
     hfig = figure(double(cfg.figure_number));
     clf(hfig,'reset');
+    setappdata(hfig,'SAGEFigureFamily','timeseries');
     set(hfig,'Color','w','Visible','on','NumberTitle','off', ...
         'Units','pixels','Position',[20 90 1400 800]);
     if isfield(cfg,'name') && ~isempty(cfg.name)
@@ -6162,7 +6072,7 @@ function hfig = local_plot_paper_hydrograph(cfg,mdl,dat,bas,prd,Q, ...
         temperatureLabel = axT(ip).YLabel;
         temperatureLabel.Units = 'normalized';
         temperatureLabel.FontSize = 15;
-        temperatureLabel.Position(1) = -0.035;
+        temperatureLabel.Position(1) = -0.050;
         linkaxes([axF(ip),axT(ip),axQ(ip)],'x');
         xlim(axQ(ip),qXLim);
         local_set_multiyear_ticks_paper(axQ(ip),tag,prd,idxPlot);
@@ -6471,6 +6381,7 @@ function local_plot_timeseries_fourgroups( ...
         for jf = 1:nFig
             f = figure(figBase);
             clf(f,'reset');
+            setappdata(f,'SAGEFigureFamily','timeseries');
             figBase = figBase + 1;
     
             nThisFig = min(nPerFig, ...
@@ -6704,8 +6615,9 @@ function local_plot_basin_fourgroups(axh,datk,qCol,idx,Qmat, ...
     fontsize_axis = 18;
     lw_sim = 1.10;
     
-    cPtTrain = [0.25 0.25 0.25];
-    cPtEval = [0.55 0.55 0.55];
+    visualTheme = sage_visual_theme();
+    cPtTrain = visualTheme.colors.neutral.trainingObserved;
+    cPtEval = visualTheme.colors.neutral.evaluationObserved;
     
     %cObsEdge = [0 0 0];
     cObsEdge = 'none'; %#ok
@@ -6921,8 +6833,9 @@ function [hLeg,lblLeg] = ...
     model_names)
 %LOCAL_MAKE_FOURGROUP_LEGEND Builds handles and labels for four-scenario legends.
 
-    cPtTrain = [0.25 0.25 0.25];
-    cPtEval = [0.55 0.55 0.55];
+    visualTheme = sage_visual_theme();
+    cPtTrain = visualTheme.colors.neutral.trainingObserved;
+    cPtEval = visualTheme.colors.neutral.evaluationObserved;
     
     hLeg = gobjects(0);
     lblLeg = {};
@@ -7518,7 +7431,8 @@ end
 function c = local_model_color(colors,modelId)
 %LOCAL_MODEL_COLOR Return a color without using a sparse model ID as a row.
 
-    catalogIds = [1:7 11 99];
+    visualTheme = sage_visual_theme();
+    catalogIds = visualTheme.models.ids;
     idx = find(catalogIds == double(modelId),1,'first');
     if isempty(idx) || idx > size(colors,1)-1
         idx = size(colors,1);
@@ -7529,17 +7443,39 @@ end
 function s = local_model_plot_name(model_names,modelId)
 %LOCAL_MODEL_PLOT_NAME Resolve sparse SAGE model IDs for plot labels.
 
-    if ismember(double(modelId),[11 99])
-        s = local_model_display_name(sage_model_name(modelId));
-    elseif iscell(model_names) && modelId >= 1 ...
-            && modelId <= numel(model_names)
-        s = local_model_display_name(model_names{modelId});
-    elseif ~iscell(model_names) && modelId >= 1 ...
-            && modelId <= numel(model_names)
-        s = local_model_display_name(model_names(modelId));
+    catalogIds = [1:7 11 99];
+    catalogIndex = find(catalogIds == double(modelId),1,'first');
+    if ~isempty(catalogIndex) && catalogIndex <= numel(model_names)
+        if iscell(model_names)
+            s = local_model_display_name(model_names{catalogIndex});
+        else
+            s = local_model_display_name(model_names(catalogIndex));
+        end
     else
         s = local_model_display_name(sage_model_name(modelId));
     end
+end
+
+function name = local_selected_model_name(mdl)
+%LOCAL_SELECTED_MODEL_NAME Prefer the authored name captured for this run.
+
+    modelId = double(mdl.model(1));
+    if modelId == 99 && isfield(mdl,'name') && ~isempty(mdl.name)
+        name = char(string(mdl.name));
+        return
+    end
+    catalogIds = [1:7 11 99];
+    catalogIndex = find(catalogIds == modelId,1,'first');
+    if isfield(mdl,'names') && ~isempty(catalogIndex) ...
+            && catalogIndex <= numel(mdl.names)
+        if iscell(mdl.names)
+            name = char(string(mdl.names{catalogIndex}));
+        else
+            name = char(string(mdl.names(catalogIndex)));
+        end
+        return
+    end
+    name = char(string(sage_model_name(modelId)));
 end
 function s = local_model_display_name(nameIn)
 %LOCAL_MODEL_DISPLAY_NAME Return model name for display only
@@ -7630,22 +7566,66 @@ function add_basin_label(ax,us,zoneTxt,gauge,n_char,topOffsetCm,textColor)
     x0 = 0.02;
     y0 = 1-max(0.02,offsetFraction);
     
-    text(ax,x0,y0,strjoin(txt,newline), ...
+    visualTheme = sage_visual_theme();
+    labelText = strjoin(txt,newline);
+    probe = text(ax,x0,y0,labelText, ...
         'Units','normalized', ...
         'horizontalalignment','left', ...
         'verticalalignment','top', ...
         'interpreter','none', ...
-        'fontsize',12, ...
+        'FontName',visualTheme.plots.fontName, ...
+        'fontsize',visualTheme.plots.annotationSize, ...
         'color',textColor, ...
-        'BackgroundColor','w', ...
-        'Margin',3, ...
+        'Visible','off', ...
         'clipping','on');
+    drawnow limitrate nocallbacks
+    extent = probe.Extent;
+    delete(probe);
+
+    % A translucent white field keeps basin metadata readable without
+    % obscuring the forcing record. Text.BackgroundColor has no alpha
+    % channel, so draw an axes patch immediately before the final text.
+    padX = 0.006;
+    padY = 0.008;
+    xNorm = [extent(1)-padX extent(1)+extent(3)+padX];
+    yNorm = [extent(2)-padY extent(2)+extent(4)+padY];
+    [xData,yData] = local_normalized_box_to_data(ax,xNorm,yNorm);
+    patch(ax,[xData(1) xData(2) xData(2) xData(1)], ...
+        [yData(1) yData(1) yData(2) yData(2)],'w', ...
+        'FaceAlpha',0.76,'EdgeColor','none', ...
+        'HandleVisibility','off','Clipping','on', ...
+        'Tag','SAGEBasinLabelBackground');
+    text(ax,x0,y0,labelText, ...
+        'Units','normalized', ...
+        'horizontalalignment','left', ...
+        'verticalalignment','top', ...
+        'interpreter','none', ...
+        'FontName',visualTheme.plots.fontName, ...
+        'fontsize',visualTheme.plots.annotationSize, ...
+        'color',textColor, ...
+        'clipping','on', ...
+        'Tag','SAGEBasinLabel');
     
     % The label is created after the forcing and discharge graphics and is
     % therefore already the uppermost ordinary child. Do not call uistack
     % here: axes configured with yyaxis contain internal ruler children for
     % which uistack can fail with "Children may only be set to a permutation
     % of itself" and abort creation of the remaining time-series panels.
+end
+
+function [xData,yData] = local_normalized_box_to_data(ax,xNorm,yNorm)
+% Convert a normalized rectangle to the active ruler's data coordinates.
+
+    xl = xlim(ax);
+    yl = ylim(ax);
+    xData = xl(1)+xNorm*diff(xl);
+    yData = yl(1)+yNorm*diff(yl);
+    if strcmpi(ax.XDir,'reverse')
+        xData = xl(2)-xNorm*diff(xl);
+    end
+    if strcmpi(ax.YDir,'reverse')
+        yData = yl(2)-yNorm*diff(yl);
+    end
 end
 
 function tf = local_incomplete_forcing(datk)
@@ -8171,6 +8151,7 @@ function local_plot_one_fdc_group_page( ...
     figH = figH0 * (0.56 + 0.44*(nActiveRows == 2));
     
     figure(figNo); clf;
+    setappdata(gcf,'SAGEFigureFamily','fdc');
     set(gcf,'color','w', ...
         'NumberTitle','off', ...
         'Units','inches', ...
@@ -8534,26 +8515,14 @@ end
 function [cObs,cSim] = local_fdc_colors(tag)
 %LOCAL_FDC_COLORS Returns observed and simulated colors for an FDC scenario.
 
-    switch lower(tag)
-        case 'tt'
-            cObs = [0.50 0.50 0.50];
-            cSim = [0.00 0.00 0.00];
-    
-        case 'te'
-            cObs = [0.93 0.74 0.56];
-            cSim = [0.85 0.33 0.10];
-    
-        case 'et'
-            cObs = [0.62 0.80 0.95];
-            cSim = [0.00 0.45 0.74];
-    
-        case 'ee'
-            cObs = [0.78 0.69 0.86];
-            cSim = [0.49 0.18 0.56];
-    
-        otherwise
-            cObs = [0.50 0.50 0.50];
-            cSim = [0.00 0.00 0.00];
+    theme = sage_visual_theme();
+    key = lower(char(tag));
+    if isfield(theme.colors.scenario,key)
+        cObs = theme.colors.scenarioLight.(key);
+        cSim = theme.colors.scenario.(key);
+    else
+        cObs = [0.50 0.50 0.50];
+        cSim = theme.colors.neutral.black;
     end
 end
 
@@ -9098,8 +9067,8 @@ function s = local_basin_code(u,region)
         return
     end
 
-    if any(strcmp(reg,{'CAMELS_CH', ...
-            'CH','SWITZERLAND'}))
+    if any(strcmp(reg,{'CAMELS_CH','HYD_RESPONSES', ...
+            'CH','HYD','SWITZERLAND'}))
 
         s = char(string(s));
         s = strtrim(s);

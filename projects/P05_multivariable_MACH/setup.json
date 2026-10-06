@@ -1,0 +1,15 @@
+{
+  "region": "HYD_RESPONSES",
+  "regionName": "Switzerland",
+  "file_univ": "HYD_184_basins.txt",
+  "file_split": "split_HYD_184_150_34_1.txt",
+  "mdl": {"model": 6, "mcode": 4, "calc": "parfeval", "mode": 4},
+  "bas": {"K": 184, "K_t": 150, "K_e": 34, "sample": "file", "id_attr": [1,2,4,5,6,7,9,10,16,18,32,33,34,35,36,37,38,39,45,46,47,49,50,51,52,53]},
+  "prd": {"dt": 1, "method": "manual", "dts": [1,1,2007], "dte": [31,12,2014], "des": [1,1,2015], "dee": [31,12,2022], "spinup": 365},
+  "misc": {
+    "meteo": {"data": 1, "precip": 1, "temp": 1, "pet": 1},
+    "net": {"h": [32], "tf": ["tanh"], "seed": 0},
+    "loss": {"fnc": 2, "method": 1, "n_win": 7, "M": 2, "observed": ["Q","SWE","SM"], "weight": {"Q": 0.3333333333333333, "SWE": 0.3333333333333333, "SM": 0.3333333333333333}, "normalization": {"method": "auto"}},
+    "alg": {"method": 2, "i_max": 250, "lr": 0.01, "beta_1": 0.9, "beta_2": 0.999, "vareps": 1e-8, "wdecay": 0.0001, "clipn": 1, "lr_min": 0.0001, "lr_scheme": "constant", "lr_hold": 0.2}
+  }
+}

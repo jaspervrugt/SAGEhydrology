@@ -567,18 +567,14 @@ static void xinanjiang_odefcn(const double* u,
         dE_dc = 0.0;
         dE_dW = Ea / LM;
     } else {
-        const double E0 = c * Ea;
-        // Water-limiting factor near W=0
-        const double W_phi = 1;
-        const double W_W_phi = W + W_phi;
-        const double phiW = W / W_W_phi; // ~1 for big W, ~0 near W=0
-        const double dphi_dW = W_phi / (W_W_phi * W_W_phi);
-        // Scaled evaporation
-        E = E0 * phiW;
-        // Derivatives
-        dE_dW = E0 * dphi_dW;      // since E0 independent of W here
-        dE_dc = Ea * phiW;         // scale by phiW
-        dE_df_p = (c * Ep) * phiW; // scale by phiW (Ea depends on f_p)
+        /* Keep E continuous at the moving boundary W=c*LM. Applying a
+           water-limiting factor only in this branch creates a jump whose
+           displacement is seen by finite differences but is absent from
+           the analytic tangent equation. */
+        E = c * Ea;
+        dE_dW = 0.0;
+        dE_dc = Ea;
+        dE_df_p = c * Ep;
         dE_dLM = 0.0;
     }
 

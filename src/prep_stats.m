@@ -1,4 +1,4 @@
-function [dat,loss] = prep_stats(dat,mdl,split,loss)
+function [dat,loss] = prep_stats(dat,mdl,split,loss,progressFcn)
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %PREP_STATS Prepare observation-specific loss statistics.
 %
@@ -21,13 +21,15 @@ function [dat,loss] = prep_stats(dat,mdl,split,loss)
 %    .method         JKGE benchmark method (1 to 4)
 %    .fdc            FDC formulation settings
 %     .kosugi          optional Kosugi preprocessing switch [false]
+%     .kosugi_dual     optional five-parameter dual-Kosugi switch [false]
 %
 % OUTPUT ARGUMENTS:
 %   dat             basin records with prepared loss statistics
 %    {k}.stats       named train/evaluation statistics and indices
 %    {k}.jkge        named JKGE benchmark caches
 %    {k}.fdc         named train/evaluation FDC caches
-%    {k}.hydro.fdc.kosugi  optional training-derived Kosugi parameters
+%    {k}.hydro.fdc.kosugi       optional single-Kosugi parameters
+%    {k}.hydro.fdc.kosugi_dual  optional dual-Kosugi parameters
 %   loss            loss settings with shared benchmark metadata
 %    .meta           shared JKGE time metadata
 %    .fdc            observation-specific FDC references
@@ -264,6 +266,16 @@ function [dat,loss] = prep_stats(dat,mdl,split,loss)
             || isempty(loss.fdc.kosugi)
         loss.fdc.kosugi = false;
     end
+    if nargin < 5
+        progressFcn = [];
+    end
+    if isfield(mdl,'ai_requires_kosugi') ...
+            && isscalar(mdl.ai_requires_kosugi) ...
+            && logical(mdl.ai_requires_kosugi)
+        % Required AI-model forcing takes precedence over the optional
+        % diagnostic default. The fit still uses training observations only.
+        loss.fdc.kosugi = true;
+    end
     if ~(isscalar(loss.fdc.kosugi) ...
             && (islogical(loss.fdc.kosugi) ...
             || isnumeric(loss.fdc.kosugi)) ...
@@ -272,6 +284,102 @@ function [dat,loss] = prep_stats(dat,mdl,split,loss)
             'loss.fdc.kosugi must be a scalar logical/numeric flag.');
     end
     doKosugi = logical(loss.fdc.kosugi);
+    if ~isfield(loss.fdc,'kosugi_dual') ...
+            || isempty(loss.fdc.kosugi_dual)
+        loss.fdc.kosugi_dual = false;
+    end
+    if isfield(mdl,'ai_requires_dual_kosugi') ...
+            && isscalar(mdl.ai_requires_dual_kosugi) ...
+            && logical(mdl.ai_requires_dual_kosugi)
+        loss.fdc.kosugi_dual = true;
+    end
+    if ~(isscalar(loss.fdc.kosugi_dual) ...
+            && (islogical(loss.fdc.kosugi_dual) ...
+            || isnumeric(loss.fdc.kosugi_dual)) ...
+            && isfinite(double(loss.fdc.kosugi_dual)))
+        error('prep_stats:DualKosugi', ...
+            ['loss.fdc.kosugi_dual must be a scalar ' ...
+             'logical/numeric flag.']);
+    end
+    doDualKosugi = logical(loss.fdc.kosugi_dual);
+    if ~isfield(loss.fdc,'kosugi_dual_options') ...
+            || isempty(loss.fdc.kosugi_dual_options)
+        loss.fdc.kosugi_dual_options = struct();
+    elseif ~isstruct(loss.fdc.kosugi_dual_options) ...
+            || ~isscalar(loss.fdc.kosugi_dual_options)
+        error('prep_stats:DualKosugiOptions', ...
+            'loss.fdc.kosugi_dual_options must be a scalar structure.');
+    end
+    % Retain the current single fit whenever the dual alternative is
+    % requested so callers can compare both representations basin by basin.
+    doKosugi = doKosugi ...
+        || doDualKosugi;
+    loss.fdc.kosugi = doKosugi;
+
+    % Basin FDC fits are independent. When the pipeline has prepared a
+    % process pool, distribute these expensive observation-operator fits
+    % across workers while reporting completions on the MATLAB client.
+    kosugiFits = cell(K,1);
+    dualKosugiFits = cell(K,1);
+    fitsPrepared = false;
+    consoleProgress = -1;
+    progressClock = tic;
+    consoleSuffix = sprintf(' [%d/%d, %5.1f%% done]',0,K,0);
+    fprintf(['... Preparing observation ' ...
+        'statistics%s'],consoleSuffix);
+    if doKosugi
+        qTrain = cell(K,1);
+        for kk = 1:K
+            if isfield(mdl,'local') ...
+                    && mdl.local == 1 ...
+                    && isfield(dat{kk},'id_train') ...
+                    && ~isempty(dat{kk}.id_train)
+                ids = double(dat{kk}.id_train(:));
+            else
+                ids = global_id_train(:);
+            end
+            if ~isempty(ids) ...
+                    && isfield(dat{kk},'obs') ...
+                    && isfield(dat{kk}.obs,'Q') ...
+                    && ~isempty(dat{kk}.obs.Q)
+                qTrain{kk} = double(dat{kk}.obs.Q.value(ids));
+            end
+        end
+        pool = [];
+        if exist('gcp','file') == 2
+            pool = gcp('nocreate');
+        end
+        if ~isempty(pool) ...
+                && K > 1
+            completedFits = 0;
+            queue = parallel.pool.DataQueue;
+            afterEach(queue,@local_fit_complete);
+            dualOptions = loss.fdc.kosugi_dual_options;
+            parfor kk = 1:K
+                if ~isempty(qTrain{kk})
+                    kosugiFits{kk} = fit_kosugi_fdc(qTrain{kk});
+                    if doDualKosugi
+                        dualKosugiFits{kk} = ...
+                            fit_dual_kosugi_fdc(qTrain{kk},dualOptions);
+                    end
+                end
+                send(queue,1);
+            end
+        else
+            for kk = 1:K
+                if ~isempty(qTrain{kk})
+                    kosugiFits{kk} = fit_kosugi_fdc(qTrain{kk});
+                    if doDualKosugi
+                        dualKosugiFits{kk} = fit_dual_kosugi_fdc( ...
+                            qTrain{kk},loss.fdc.kosugi_dual_options);
+                    end
+                end
+                local_report_progress(kk,K);
+                local_console_progress(kk,K);
+            end
+        end
+        fitsPrepared = true;
+    end
 
     emptyReferences = struct('D0t',nan(K,1),'D0e',nan(K,1), ...
         'D0pt',nan(K,1),'D0pe',nan(K,1), ...
@@ -286,9 +394,6 @@ function [dat,loss] = prep_stats(dat,mdl,split,loss)
         loss.fdc.(char(prepNames(j))) = emptyReferences;
     end
 
-    fprintf(['... Preparing observation ' ...
-        'statistics %3d%%'],0);
-    
     for k = 1:K
         if isfield(mdl,'local') ...
                 && mdl.local == 1 ...
@@ -331,8 +436,14 @@ function [dat,loss] = prep_stats(dat,mdl,split,loss)
                 || ~isstruct(dat{k}.hydro.fdc)
             dat{k}.hydro.fdc = struct();
         end
-        if ~doKosugi && isfield(dat{k}.hydro.fdc,'kosugi')
+        if ~doKosugi ...
+                && isfield(dat{k}.hydro.fdc,'kosugi')
             dat{k}.hydro.fdc = rmfield(dat{k}.hydro.fdc,'kosugi');
+        end
+        if ~doDualKosugi ...
+                && isfield(dat{k}.hydro.fdc,'kosugi_dual')
+            dat{k}.hydro.fdc = ...
+                rmfield(dat{k}.hydro.fdc,'kosugi_dual');
         end
 
         for j = 1:numel(prepNames)
@@ -355,16 +466,21 @@ function [dat,loss] = prep_stats(dat,mdl,split,loss)
             % empirical zero-flow probability; a,b,c describe the
             % conditional positive-flow Kosugi component when p0>0.
             % ------------------------------------------------------
-            if doKosugi && strcmp(name,'Q') ...
+            if doKosugi ...
+                    && strcmp(name,'Q') ...
                     && stats.train.has_data
-                q_train = double(obs.value(stats.train.indices));
-                dat{k}.hydro.fdc.kosugi = fit_kosugi_fdc(q_train);
+                dat{k}.hydro.fdc.kosugi = kosugiFits{k};
+                if doDualKosugi
+                    dat{k}.hydro.fdc.kosugi_dual = ...
+                        dualKosugiFits{k};
+                end
             end
 
             hasObs = ~isempty(obs) ...
                 && isfield(obs,'value') ...
                 && ~isempty(obs.value);
-            if doJKGE && hasObs
+            if doJKGE ...
+                    && hasObs
                 y_n = double(obs.value(:));
                 if max(id_train) > numel(y_n) ...
                         || any(id_train < 1)
@@ -397,14 +513,47 @@ function [dat,loss] = prep_stats(dat,mdl,split,loss)
             end
         end
     
-        if mod(k,20)==0 ...
-                || k==K
-            pct = floor(100*k/K);
-            fprintf('\b\b\b\b%3d%%',pct);
+        if ~fitsPrepared
+            local_report_progress(k,K);
+            local_console_progress(k,K);
         end
     end
     
-    fprintf('\b\b\b\b... Done\n');
+    % Replace the transient percentage with the completion marker and
+    % always terminate the console row. A GUI progress callback must not
+    % leave subsequent console output appended to this line.
+    fprintf(repmat('\b',1,numel(consoleSuffix)));
+    fprintf(' ... Done\n');
+
+    function local_fit_complete(~)
+        completedFits = completedFits + 1;
+        local_report_progress(completedFits,K);
+        local_console_progress(completedFits,K);
+    end
+
+    function local_report_progress(kDone,nTotal)
+        % Updating a uifigure for every basin can dominate the arithmetic.
+        % Keep the first/final updates and at most five updates per second.
+        if ~isempty(progressFcn) && (kDone == 1 || kDone == nTotal ...
+                || toc(progressClock) >= 0.2)
+            progressFcn(kDone,nTotal);
+            progressClock = tic;
+        end
+    end
+
+    function local_console_progress(kDone,nTotal)
+        pct = 100*double(kDone)/max(1,double(nTotal));
+        pctKey = floor(10*pct);
+        if pctKey == consoleProgress
+            return
+        end
+        suffix = sprintf(' [%d/%d, %5.1f%% done]', ...
+            kDone,nTotal,pct);
+        fprintf(repmat('\b',1,numel(consoleSuffix)));
+        fprintf('%s',suffix);
+        consoleSuffix = suffix;
+        consoleProgress = pctKey;
+    end
 
 end
 

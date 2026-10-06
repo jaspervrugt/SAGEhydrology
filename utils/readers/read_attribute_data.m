@@ -408,6 +408,27 @@ function T = local_read_table(dirD,S,idSchema)
             && strcmpi(S.boolean_text,'auto')
         T = local_boolean_text(T);
     end
+    if isfield(S,'fill_missing_zero_prefixes') ...
+            && ~isempty(S.fill_missing_zero_prefixes)
+        prefixes = string(S.fill_missing_zero_prefixes);
+        names = string(T.Properties.VariableNames);
+        for i = 1:width(T)
+            if any(startsWith(names(i),prefixes))
+                value = T.(i);
+                if ~isnumeric(value) ...
+                        && (iscell(value) ...
+                        || isstring(value) ...
+                        || iscategorical(value))
+                    value = local_numeric(value);
+                end
+                if ~isnumeric(value)
+                    continue
+                end
+                value(isnan(value)) = 0;
+                T.(i) = value;
+            end
+        end
+    end
     if isfield(S,'drop_empty_columns') ...
             && S.drop_empty_columns
         keep = true(1,width(T));

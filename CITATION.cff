@@ -2,8 +2,8 @@ cff-version: 1.2.0
 message: "If you use SAGEhydrology, please cite the software and relevant papers."
 title: "SAGEhydrology"
 type: software
-version: 1.0.2
-date-released: 2026-09-28
+version: 1.0.3
+date-released: 2026-10-05
 authors:
   - family-names: Vrugt
     given-names: Jasper A.

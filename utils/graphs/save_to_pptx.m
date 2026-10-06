@@ -57,6 +57,8 @@ function outFile = save_to_pptx(C,outFile)
     end
     
     figs = local_get_export_figures();
+    exportTheme = sage_visual_theme();
+    sage_apply_figure_theme(figs,exportTheme,'pptx');
     
     if isempty(figs)
         error(['No exportable ' ...
@@ -212,7 +214,9 @@ function mapsPng = local_make_region_zones_png(C,tmpDir)
         zonesImage = imread(zonesFile);
 
         mapsPng = fullfile(tmpDir,'region_zones_maps.png');
-        fig = figure('Visible','off','Color','w','Units','pixels', ...
+        theme = sage_visual_theme();
+        fig = figure('Visible','off', ...
+            'Color',theme.backgrounds.export,'Units','pixels', ...
             'Position',[100 100 1600 900],'PaperPositionMode','auto');
         layout = tiledlayout(fig,1,2,'Padding','compact', ...
             'TileSpacing','compact');
@@ -220,12 +224,18 @@ function mapsPng = local_make_region_zones_png(C,tmpDir)
         image(axRegion,regionImage);
         axis(axRegion,'image');
         axis(axRegion,'off');
-        title(axRegion,'Region','FontSize',18,'FontWeight','normal');
+        title(axRegion,'Region', ...
+            'FontName',theme.export.fontName, ...
+            'FontSize',theme.plots.titleSize, ...
+            'FontWeight',theme.plots.titleWeight);
         axZones = nexttile(layout,2);
         image(axZones,zonesImage);
         axis(axZones,'image');
         axis(axZones,'off');
-        title(axZones,'Zones','FontSize',18,'FontWeight','normal');
+        title(axZones,'Zones', ...
+            'FontName',theme.export.fontName, ...
+            'FontSize',theme.plots.titleSize, ...
+            'FontWeight',theme.plots.titleWeight);
         exportgraphics(fig,mapsPng,'Resolution',150, ...
             'BackgroundColor','white','ContentType','image');
         close(fig);
@@ -306,7 +316,13 @@ function figs = local_get_export_figures()
     end
     
     try
-        [~,idx] = sort(double(figs));
+        order = double(figs);
+        for i = 1:numel(figs)
+            if isappdata(figs(i),'SAGEExportOrder')
+                order(i) = double(getappdata(figs(i),'SAGEExportOrder'));
+            end
+        end
+        [~,idx] = sort(order);
         figs = figs(idx);
     catch
     end
@@ -337,7 +353,14 @@ function imgFiles = local_export_figures_to_png(figs,tmpDir)
                 k,numel(figs), ...
                 local_fig_name(f));
     
-            drawnow limitrate nocallbacks
+            if contains(figureName,'sage diagnostics')
+                figure(f);
+                drawnow expose
+                pause(0.15)
+                drawnow expose
+            else
+                drawnow limitrate nocallbacks
+            end
             pause(0.2);
             % Avoid enormous bitmap exports in deployed mode.
             try
@@ -788,6 +811,7 @@ function local_write_pdf_from_png(pdfFile, ...
 end
 
 function local_add_preview_slides(pres,ppLayoutBlank,C)
+    theme = sage_visual_theme();
 %LOCAL_ADD_PREVIEW_SLIDES Add the complete GUI Preview tab over several slides.
 
     if ~isfield(C,'runtime') || ~isstruct(C.runtime) ...
@@ -843,13 +867,15 @@ function local_add_preview_slides(pres,ppLayoutBlank,C)
                 page,pageCount);
         end
         titleBox.TextFrame.TextRange.Text = titleText;
-        titleBox.TextFrame.TextRange.Font.Size = 24;
+        titleBox.TextFrame.TextRange.Font.Name = theme.export.fontName;
+        titleBox.TextFrame.TextRange.Font.Size = theme.export.subtitleSize;
         titleBox.TextFrame.TextRange.Font.Bold = 1;
 
         previewBox = invoke(shapes,'AddTextbox', ...
             1,45,70,slideW-90,slideH-95);
         previewBox.TextFrame.TextRange.Text = pageText;
-        previewBox.TextFrame.TextRange.Font.Name = 'Consolas';
+        previewBox.TextFrame.TextRange.Font.Name = ...
+            theme.fonts.family.monospace;
         previewBox.TextFrame.TextRange.Font.Size = 10;
         previewBox.TextFrame.WordWrap = -1;
         previewBox.TextFrame.MarginLeft = 6;
@@ -864,8 +890,9 @@ function titlePng = local_make_title_png(C,tmpDir)
 
     titlePng = fullfile(tmpDir,'title_page.png');
     
+    theme = sage_visual_theme();
     fig = figure('Visible','off', ...
-        'Color','w', ...
+        'Color',theme.backgrounds.export, ...
         'Units','pixels', ...
         'Position',[100 100 1200 675], ...
         'PaperPositionMode','auto');
@@ -897,12 +924,14 @@ function titlePng = local_make_title_png(C,tmpDir)
         splitStr,sampleStr);
 
     text(0.05,0.96,'SAGE results', ...
-        'FontSize',28, ...
+        'FontName',theme.export.fontName, ...
+        'FontSize',theme.export.titleSize, ...
         'FontWeight','bold', ...
         'Interpreter','none');
     
     text(0.05,0.87,txt, ...
-        'FontSize',14, ...
+        'FontName',theme.export.fontName, ...
+        'FontSize',theme.export.bodySize, ...
         'Interpreter','none', ...
         'VerticalAlignment','top');
     
@@ -913,7 +942,8 @@ function titlePng = local_make_title_png(C,tmpDir)
         end
     
         text(0.05,0.08,['Run note:' newline char(note)], ...
-            'FontSize',11, ...
+            'FontName',theme.export.fontName, ...
+            'FontSize',theme.export.noteSize, ...
             'FontAngle','italic', ...
             'Interpreter','none', ...
             'VerticalAlignment','top');
@@ -979,6 +1009,7 @@ function pptFile = local_default_pptx_name(C)
 end
 
 function local_add_title_slide(pres,ppLayoutBlank,C)
+    theme = sage_visual_theme();
 %LOCAL_ADD_TITLE_SLIDE Add first slide with SAGE run settings.
 
     slides = get(pres,'Slides');
@@ -1029,11 +1060,13 @@ function local_add_title_slide(pres,ppLayoutBlank,C)
     textBox = invoke(shapes,'AddTextbox', ...
         1,60,78,slideW-120,slideH-88);
     textBox.TextFrame.TextRange.Text = txt;
-    textBox.TextFrame.TextRange.Font.Size = 11;
+    textBox.TextFrame.TextRange.Font.Name = theme.export.fontName;
+    textBox.TextFrame.TextRange.Font.Size = theme.export.noteSize;
     
 end
 
 function local_add_data_quality_slide(pres,ppLayoutBlank,C)
+    theme = sage_visual_theme();
 %LOCAL_ADD_DATA_QUALITY_SLIDE Summarize requested and active populations.
 
     if ~isfield(C,'bas') || ~isstruct(C.bas) ...
@@ -1127,20 +1160,23 @@ function local_add_data_quality_slide(pres,ppLayoutBlank,C)
 
     titleBox = invoke(shapes,'AddTextbox',1,40,30,slideW-80,45);
     titleBox.TextFrame.TextRange.Text = 'Data-quality screening';
-    titleBox.TextFrame.TextRange.Font.Size = 28;
+    titleBox.TextFrame.TextRange.Font.Name = theme.export.fontName;
+    titleBox.TextFrame.TextRange.Font.Size = theme.export.titleSize;
     titleBox.TextFrame.TextRange.Font.Bold = 1;
 
     introBox = invoke(shapes,'AddTextbox',1,55,85,slideW-110,42);
     introBox.TextFrame.TextRange.Text = ...
         'The universal basin inventory is screened before SAGE training.';
-    introBox.TextFrame.TextRange.Font.Size = 16;
+    introBox.TextFrame.TextRange.Font.Name = theme.export.fontName;
+    introBox.TextFrame.TextRange.Font.Size = theme.export.bodySize;
 
     requestedBox = invoke(shapes,'AddTextbox', ...
         1,70,135,slideW-140,42);
     requestedBox.TextFrame.TextRange.Text = sprintf( ...
         'Requested:   K = %d      K_t = %d      K_e = %d', ...
         requestedK,requestedKt,requestedKe);
-    requestedBox.TextFrame.TextRange.Font.Size = 20;
+    requestedBox.TextFrame.TextRange.Font.Name = theme.export.fontName;
+    requestedBox.TextFrame.TextRange.Font.Size = theme.export.subtitleSize;
     requestedBox.TextFrame.TextRange.Font.Bold = 1;
 
     activeBox = invoke(shapes,'AddTextbox', ...
@@ -1148,7 +1184,8 @@ function local_add_data_quality_slide(pres,ppLayoutBlank,C)
     activeBox.TextFrame.TextRange.Text = sprintf( ...
         'Active:          K = %d      K_t = %d      K_e = %d', ...
         activeK,activeKt,activeKe);
-    activeBox.TextFrame.TextRange.Font.Size = 20;
+    activeBox.TextFrame.TextRange.Font.Name = theme.export.fontName;
+    activeBox.TextFrame.TextRange.Font.Size = theme.export.subtitleSize;
     activeBox.TextFrame.TextRange.Font.Bold = 1;
     activeBox.TextFrame.TextRange.Font.Color.RGB = 32768;
 
@@ -1157,7 +1194,8 @@ function local_add_data_quality_slide(pres,ppLayoutBlank,C)
     excludedBox.TextFrame.TextRange.Text = sprintf( ...
         'Excluded:      K = %d      training = %d      evaluation = %d', ...
         excludedK,requestedKt-activeKt,requestedKe-activeKe);
-    excludedBox.TextFrame.TextRange.Font.Size = 20;
+    excludedBox.TextFrame.TextRange.Font.Name = theme.export.fontName;
+    excludedBox.TextFrame.TextRange.Font.Size = theme.export.subtitleSize;
     excludedBox.TextFrame.TextRange.Font.Bold = 1;
     excludedBox.TextFrame.TextRange.Font.Color.RGB = 192;
 
@@ -1165,7 +1203,8 @@ function local_add_data_quality_slide(pres,ppLayoutBlank,C)
         1,70,290,slideW-140,32);
     categoryTitle.TextFrame.TextRange.Text = ...
         'Mutually exclusive screening categories';
-    categoryTitle.TextFrame.TextRange.Font.Size = 18;
+    categoryTitle.TextFrame.TextRange.Font.Name = theme.export.fontName;
+    categoryTitle.TextFrame.TextRange.Font.Size = theme.export.sectionSize;
     categoryTitle.TextFrame.TextRange.Font.Bold = 1;
 
     % Use a native PowerPoint table rather than space-padded text. Font
@@ -1200,7 +1239,8 @@ function local_add_data_quality_slide(pres,ppLayoutBlank,C)
                 cellText = labels{row,column};
             end
             cellShape.TextFrame.TextRange.Text = cellText;
-            cellShape.TextFrame.TextRange.Font.Size = 14;
+            cellShape.TextFrame.TextRange.Font.Name = theme.export.fontName;
+            cellShape.TextFrame.TextRange.Font.Size = theme.export.tableSize;
             cellShape.TextFrame.VerticalAnchor = 3;
             if column == 1
                 cellShape.TextFrame.TextRange.ParagraphFormat.Alignment = 1;
@@ -1219,12 +1259,14 @@ function local_add_data_quality_slide(pres,ppLayoutBlank,C)
     noteBox.TextFrame.TextRange.Text = [ ...
         'Eligibility requires complete P, E_p, and T, plus at least 5% ' ...
         'finite, nonconstant discharge in both periods.'];
-    noteBox.TextFrame.TextRange.Font.Size = 13;
+    noteBox.TextFrame.TextRange.Font.Name = theme.export.fontName;
+    noteBox.TextFrame.TextRange.Font.Size = theme.export.noteSize;
     noteBox.TextFrame.TextRange.Font.Italic = 1;
 end
 
 function local_add_run_notes_slide(pres,ppLayoutBlank,C)
 %LOCAL_ADD_RUN_NOTES_SLIDE Add the complete run audit on its own slide.
+    theme = sage_visual_theme();
 
     note = strip(local_run_note_string(C));
     if strlength(note) == 0
@@ -1241,13 +1283,15 @@ function local_add_run_notes_slide(pres,ppLayoutBlank,C)
 
     titleBox = invoke(shapes,'AddTextbox',1,40,30,slideW-80,45);
     titleBox.TextFrame.TextRange.Text = 'Run Notes';
-    titleBox.TextFrame.TextRange.Font.Size = 28;
+    titleBox.TextFrame.TextRange.Font.Name = theme.export.fontName;
+    titleBox.TextFrame.TextRange.Font.Size = theme.export.titleSize;
     titleBox.TextFrame.TextRange.Font.Bold = 1;
 
     noteBox = invoke(shapes,'AddTextbox', ...
         1,55,90,slideW-110,slideH-125);
     noteBox.TextFrame.TextRange.Text = char(note);
-    noteBox.TextFrame.TextRange.Font.Size = 16;
+    noteBox.TextFrame.TextRange.Font.Name = theme.export.fontName;
+    noteBox.TextFrame.TextRange.Font.Size = theme.export.bodySize;
     noteBox.TextFrame.WordWrap = -1;
     noteBox.TextFrame.MarginLeft = 8;
     noteBox.TextFrame.MarginRight = 8;
@@ -2198,19 +2242,28 @@ function s = local_model_name(C)
     s = 'n/a';
     
     try
-        if isfield(C,'mdl') ...
+        if isfield(C,'mdl') && isfield(C.mdl,'model') ...
+                && double(C.mdl.model(1)) == 99 ...
+                && isfield(C.mdl,'name') && ~isempty(C.mdl.name)
+            s = char(string(C.mdl.name));
+        elseif isfield(C,'mdl') ...
                 && isfield(C.mdl,'names') ...
                 && isfield(C.mdl,'model') ...
                 && ~isempty(C.mdl.names)
-            s = C.mdl.names{C.mdl.model};
+            catalogIds = [1:7 11 99];
+            catalogIndex = find(catalogIds == ...
+                double(C.mdl.model(1)),1,'first');
+            if isempty(catalogIndex) || catalogIndex > numel(C.mdl.names)
+                error('save_to_pptx:UnknownModel','Unknown model ID.');
+            end
+            if iscell(C.mdl.names)
+                s = C.mdl.names{catalogIndex};
+            else
+                s = char(string(C.mdl.names(catalogIndex)));
+            end
         end
     catch
-        try
-            s = C.mdl.names(C.mdl.model);
-            s = char(string(s));
-        catch
-            s = 'n/a';
-        end
+        s = 'n/a';
     end
 end
 

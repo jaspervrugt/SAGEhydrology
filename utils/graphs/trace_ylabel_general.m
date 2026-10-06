@@ -73,6 +73,15 @@ function [mainSym,subSym] = local_split_latex_symbol(name)
 
     name = strtrim(char(name));
     subSym = '';
+
+    % GCHM uses descriptive implementation names that are much too long to
+    % typeset literally.  Keep this map here (rather than in an individual
+    % GUI) so the on-screen traces and exported SAGE figures use exactly the
+    % same compact, valid LaTeX notation.
+    [isGchm,mainSym,subSym] = local_gchm_symbol(name);
+    if isGchm
+        return
+    end
     
     % Case 1: something_{...}
     tok = regexp(name,'^(.+)_\{(.+)\}$','tokens','once');
@@ -92,6 +101,79 @@ function [mainSym,subSym] = local_split_latex_symbol(name)
     
     % Case 3: no subscript
     mainSym = local_format_symbol(name);
+end
+
+function [matched,mainSym,subSym] = local_gchm_symbol(name)
+%LOCAL_GCHM_SYMBOL Compact mathematical labels for all 30 GCHM parameters.
+
+    matched = true;
+    mainSym = '';
+    subSym = '';
+
+    switch lower(strtrim(char(name)))
+        case 's_p_max_theta'
+            mainSym = 'S'; subSym = '\mathrm{P,max},\theta';
+        case 's_p_max_b_parameter_theta'
+            mainSym = 'S'; subSym = '\mathrm{P,max},b\theta';
+        case 's_b1_theta'
+            mainSym = 'S'; subSym = '\mathrm{b1},\theta';
+        case 's_b2_theta'
+            mainSym = 'S'; subSym = '\mathrm{b2},\theta';
+        case 's_b3_theta'
+            mainSym = 'S'; subSym = '\mathrm{b3},\theta';
+        case 's_a1_theta'
+            mainSym = 'S'; subSym = '\mathrm{a1},\theta';
+        case 's_max_theta'
+            mainSym = 'S'; subSym = '\mathrm{max},\theta';
+        case 's_max_b_parameter_theta'
+            mainSym = 'S'; subSym = '\mathrm{max},b\theta';
+        case 's_b_seepage_x'
+            mainSym = 'S'; subSym = '\mathrm{b,seepage},X';
+        case 's_a_seepage'
+            mainSym = 'S'; subSym = '\mathrm{a,seepage}';
+        case 's_c_seepage'
+            mainSym = 'S'; subSym = '\mathrm{c,seepage}';
+        case 's_b_out_x'
+            mainSym = 'S'; subSym = '\mathrm{b,out},X';
+        case 's_a_out'
+            mainSym = 'S'; subSym = '\mathrm{a,out}';
+        case 's_c_out'
+            mainSym = 'S'; subSym = '\mathrm{c,out}';
+        case 's_c_et'
+            mainSym = 'S'; subSym = '\mathrm{c,ET}';
+        case 's_c_remember'
+            mainSym = 'S'; subSym = '\mathrm{c,remember}';
+        case 'b_b1_theta'
+            mainSym = 'B'; subSym = '\mathrm{b1},\theta';
+        case 'b_b2_theta'
+            mainSym = 'B'; subSym = '\mathrm{b2},\theta';
+        case 'b_b3_theta'
+            mainSym = 'B'; subSym = '\mathrm{b3},\theta';
+        case 'b_a1_theta'
+            mainSym = 'B'; subSym = '\mathrm{a1},\theta';
+        case 'b_b_out_x'
+            mainSym = 'B'; subSym = '\mathrm{b,out},X';
+        case 'b_a_out'
+            mainSym = 'B'; subSym = '\mathrm{a,out}';
+        case 'b_c_out'
+            mainSym = 'B'; subSym = '\mathrm{c,out}';
+        case 'b_c_et'
+            mainSym = 'B'; subSym = '\mathrm{c,ET}';
+        case 'b_c_remember'
+            mainSym = 'B'; subSym = '\mathrm{c,remember}';
+        case 'b1_melting_soil_theta'
+            mainSym = 'b'; subSym = '1,\mathrm{melt},\theta';
+        case 'b2_melting_soil_theta'
+            mainSym = 'b'; subSym = '2,\mathrm{melt},\theta';
+        case 'c_melting_soil_theta'
+            mainSym = 'c'; subSym = '\mathrm{melt},\theta';
+        case 'b_rain_fraction_theta'
+            mainSym = 'b'; subSym = '\mathrm{rain},\theta';
+        case 'c_rain_fraction_theta'
+            mainSym = 'c'; subSym = '\mathrm{rain},\theta';
+        otherwise
+            matched = false;
+    end
 end
 
 function s = local_format_symbol(txt)
@@ -122,6 +204,8 @@ function s = local_format_symbol(txt)
             s = '\delta'; return
         case 'epsilon'
             s = '\epsilon'; return
+        case 'eta'
+            s = '\eta'; return
         case 'theta'
             s = '\theta'; return
         case 'lambda'
@@ -136,6 +220,8 @@ function s = local_format_symbol(txt)
             s = '\sigma'; return
         case 'omega'
             s = '\omega'; return
+        case 'tau'
+            s = '\tau'; return
     end
     
     % single latin letter -> italic math

@@ -1,0 +1,21 @@
+{
+  "id": "P04",
+  "name": "4: SAGE GUI, Germany hourly",
+  "kind": "sage",
+  "status": "ready",
+  "summary": "Environmental Modelling & Software GUI study using Germany hourly data and its publication basin split.",
+  "paper_title": "SAGE GUI: Fast and Flexible Differentiable Hydrologic Modeling with Analytic Gradients",
+  "authors": "Jasper A. Vrugt and Jonathan M. Frame",
+  "abstract": "We present the SAGE graphical user interface (SAGE GUI), a standalone environment for Sensitivity-Aware Gradient Estimation (SAGE), a differentiable hydrologic modeling framework based on analytic gradients. It provides a unified, largely no-code environment for configuring, executing, monitoring, and analyzing large-sample experiments. Each experiment operates on one selected regional dataset; basins, hydroclimatic regions, periods, and forcing products are selected within that dataset. By combining conceptual rainfall--runoff models, neural-network parameter regionalization, analytic sensitivity analysis, and gradient-based optimization, SAGE GUI enables training across hundreds to many thousands of catchments. The software provides integrated access to 42 benchmark datasets spanning 37 regions through dataset-specific download, installation, and management workflows, with meteorological forcings, streamflow observations, and catchment attributes at daily, hourly, and 15-minute resolutions. Depending on the region, users can select multiple precipitation and temperature products and alternative potential evapotranspiration estimates. SAGE GUI further provides extensive data preprocessing and quality control, real-time hydrologic and spatial diagnostics, and information-theoretic analysis of parameter-specific information flow through trained neural networks, including mutual-information-based connection measures. Matched gradient benchmarks in the companion theory study compare numerical differentiation, automatic differentiation, and analytic forward sensitivity analysis; for the tested models and configurations, forward sensitivity analysis computes gradients orders of magnitude faster and with lower memory demand than the alternatives considered there. The present software paper reports application-specific runtime and resource use rather than a universal performance guarantee. The modular architecture facilitates extension to new conceptual model structures and learning objectives. It exports MATLAB scripts and live scripts for inspection, modification, and line-by-line execution outside the GUI. SAGE GUI is distributed as a standalone Windows and macOS application requiring neither a licensed local MATLAB installation nor specialized machine-learning software; the freely available MATLAB Runtime supports execution. By integrating data management, model development, optimization, diagnostics, visualization, and export in one reproducible workflow, SAGE GUI lowers the barrier to scalable differentiable hydrologic modeling.",
+  "reference": "Vrugt, J.A. and Frame, J.M. (2026b). SAGE GUI: Fast and Flexible Differentiable Hydrologic Modeling with Analytic Gradients. Environmental Modelling & Software. Preprint.",
+  "paper_url": "https://drive.google.com/file/d/1VDnJXse_6VvKpQOq26gk9Im1uBV4d1oQ/view?usp=drive_link",
+  "setup_file": "setup.json",
+  "source_export": "run_SAGE_export_project_04.m",
+  "notes": [
+    "The paper figures are available under results/paper_4.",
+    "Region: Germany; dataset: CAMELS-DE-1h; resolution: hourly.",
+    "Model: HBV. Data type: discharge. Basins: prescribed file split with 1000 training and 259 evaluation basins.",
+    "Training: 01 Oct 2013 to 30 Sep 2021; evaluation: 01 Oct 2005 to 30 Sep 2013.",
+    "A guided narrated tour can later be layered onto this project without changing its reproducible setup."
+  ]
+}

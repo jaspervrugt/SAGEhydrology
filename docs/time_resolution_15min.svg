@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+ <circle cx="64" cy="64" r="58" fill="white" stroke="#222" stroke-width="5"/>
+ <g stroke="#555" stroke-width="3" stroke-linecap="round"><path d="M64 12v7M116 64h-7M64 116v-7M12 64h7"/></g>
+ <g stroke="#222" stroke-width="5" stroke-linecap="round"><path d="M64 55h38M64 55V33"/></g>
+ <circle cx="64" cy="55" r="5" fill="#6f2c91"/>
+ <text x="64" y="99" text-anchor="middle" font-family="Arial,sans-serif" font-size="15" font-weight="600" fill="#222">15-min</text>
+</svg>

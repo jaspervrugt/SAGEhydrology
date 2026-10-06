@@ -1,0 +1,15 @@
+{
+  "region": "CAMELS_DEH",
+  "regionName": "Germany (CAMELS-DE-1h)",
+  "file_univ": "DEH_1259_basins.txt",
+  "file_split": "split_DEH_1259_1000_259_1.txt",
+  "mdl": {"model": 6, "mcode": 4, "calc": "parfeval", "mode": 4},
+  "bas": {"K": 1259, "K_t": 1000, "K_e": 259, "sample": "file", "id_attr": [1,2,4,5,6,7,9,10,16,18,32,33,34,35,36,37,38,39,45,46,47,49,50,51,52,53]},
+  "prd": {"dt": 24, "method": "manual", "dts": [1,10,2013], "dte": [30,9,2021], "des": [1,10,2005], "dee": [30,9,2013], "spinup": 365},
+  "misc": {
+    "meteo": {"data": 1, "precip": 1, "temp": 1, "pet": 1},
+    "net": {"h": [32], "tf": ["tanh"], "seed": 0},
+    "loss": {"fnc": 2, "method": 1, "n_win": 7, "M": 2, "observed": ["Q"], "weight": {"Q": 1}, "normalization": {"method": "auto"}},
+    "alg": {"method": 2, "i_max": 250, "lr": 0.01, "beta_1": 0.9, "beta_2": 0.999, "vareps": 1e-8, "wdecay": 0.0001, "clipn": 1, "lr_min": 0.0001, "lr_scheme": "constant", "lr_hold": 0.2}
+  }
+}

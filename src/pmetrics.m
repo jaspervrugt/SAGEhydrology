@@ -596,9 +596,34 @@ function prf = local_joint_histories( ...
                 local_sum(met.total.contribution. ...
                 (per).(name)(id));
 
+            D = met.variable.(name).diagnostic.(per);
+            diagnosticNames = {'SAR','GLS','RSS','Huber'};
+            for d = 1:numel(diagnosticNames)
+                diagnosticName = diagnosticNames{d};
+                values = D.(diagnosticName)(id);
+                prf.curr.joint.(name).(diagnosticName).(sc) = ...
+                    values.';
+                prf.iter.joint.(name).mean. ...
+                    (diagnosticName).(sc)(i) = local_mean(values);
+                prf.iter.joint.(name).median. ...
+                    (diagnosticName).(sc)(i) = local_median(values);
+            end
+
             S = met.variable.(name).performance.(per);
             prf.curr.joint.(name).NSE.(sc) = S.NSE(id).';
             prf.curr.joint.(name).KGE.(sc) = S.KGE(id).';
+            prf.iter.joint.(name).mean.NSE.(sc)(i) = ...
+                local_mean(S.NSE(id));
+            prf.iter.joint.(name).mean.KGE.(sc)(i) = ...
+                local_mean(S.KGE(id));
+            prf.iter.joint.(name).median.NSE.(sc)(i) = ...
+                local_median(S.NSE(id));
+            prf.iter.joint.(name).median.KGE.(sc)(i) = ...
+                local_median(S.KGE(id));
+            prf.iter.joint.(name).integrated.NSE.(sc)(i) = ...
+                local_mean_one_minus(S.NSE(id));
+            prf.iter.joint.(name).integrated.KGE.(sc)(i) = ...
+                local_mean_one_minus(S.KGE(id));
             components = {'r','alpha','beta'};
             for c = 1:numel(components)
                 component = components{c};
@@ -606,6 +631,10 @@ function prf = local_joint_histories( ...
                 prf.curr.joint.(name).KGE_components. ...
                     (component).(sc) = values.';
                 prf.iter.joint.(name).KGE_components. ...
+                    (component).(sc)(i) = local_median(values);
+                prf.iter.joint.(name).mean.KGE_components. ...
+                    (component).(sc)(i) = local_mean(values);
+                prf.iter.joint.(name).median.KGE_components. ...
                     (component).(sc)(i) = local_median(values);
             end
             prf.curr.joint.(name).JKGE.(sc) = S.JKGE(id).';
@@ -615,32 +644,56 @@ function prf = local_joint_histories( ...
                 local_median(S.KGE(id));
             prf.iter.joint.(name).JKGE.(sc)(i) = ...
                 local_median(S.JKGE(id));
+            prf.iter.joint.(name).mean.JKGE.(sc)(i) = ...
+                local_mean(S.JKGE(id));
+            prf.iter.joint.(name).median.JKGE.(sc)(i) = ...
+                local_median(S.JKGE(id));
+            prf.iter.joint.(name).integrated.JKGE.(sc)(i) = ...
+                local_mean_one_minus(S.JKGE(id));
             components = {'M','V','C'};
             for c = 1:numel(components)
                 component = components{c};
                 values = S.JKGE_components.(component)(id);
                 prf.iter.joint.(name).JKGE_components. ...
                     (component).(sc)(i) = local_median(values);
+                prf.iter.joint.(name).mean.JKGE_components. ...
+                    (component).(sc)(i) = local_mean(values);
+                prf.iter.joint.(name).median.JKGE_components. ...
+                    (component).(sc)(i) = local_median(values);
             end
 
-            D = S.(dFields{formulation})(id).';
-            score = nan(size(D));
-            if isfield(loss,'fdc') ...
-                    && isfield(loss.fdc,name)
-                refs = loss.fdc.(name);
-                if per == 't'
-                    refField = d0Train{formulation};
-                else
-                    refField = d0Eval{formulation};
+            durationNames = {'S_fdc','S_p','S_logp'};
+            for d = 1:numel(durationNames)
+                D = S.(dFields{d})(id).';
+                score = nan(size(D));
+                if isfield(loss,'fdc') ...
+                        && isfield(loss.fdc,name)
+                    refs = loss.fdc.(name);
+                    if per == 't'
+                        refField = d0Train{d};
+                    else
+                        refField = d0Eval{d};
+                    end
+                    if isfield(refs,refField) ...
+                            && numel(refs.(refField)) >= max(id)
+                        D0 = double(refs.(refField)(id));
+                        score = local_fdc_score(D,D0);
+                    end
                 end
-                if isfield(refs,refField) ...
-                        && numel(refs.(refField)) >= max(id)
-                    D0 = double(refs.(refField)(id));
-                    score = local_fdc_score(D,D0);
+                durationName = durationNames{d};
+                prf.curr.joint.(name).(durationName).(sc) = score;
+                prf.iter.joint.(name).duration_metrics. ...
+                    (durationName).mean.(sc)(i) = local_mean(score);
+                prf.iter.joint.(name).duration_metrics. ...
+                    (durationName).median.(sc)(i) = local_median(score);
+                prf.iter.joint.(name).duration_metrics. ...
+                    (durationName).integrated.(sc)(i) = ...
+                    local_mean_one_minus(score);
+                if d == formulation
+                    prf.iter.joint.(name).duration.(sc)(i) = ...
+                        local_median(score);
                 end
             end
-            prf.iter.joint.(name).duration.(sc)(i) = ...
-                local_median(score);
         end
     end
 end
@@ -655,10 +708,33 @@ function prf = local_store_empty_joint(prf,sc,i,names)
         prf.iter.joint.contribution.(name).(sc)(i) = NaN;
         prf.iter.joint.(name).NSE.(sc)(i) = NaN;
         prf.iter.joint.(name).KGE.(sc)(i) = NaN;
+        diagnosticNames = {'SAR','GLS','RSS','Huber'};
+        for d = 1:numel(diagnosticNames)
+            diagnosticName = diagnosticNames{d};
+            prf.iter.joint.(name).mean. ...
+                (diagnosticName).(sc)(i) = NaN;
+            prf.iter.joint.(name).median. ...
+                (diagnosticName).(sc)(i) = NaN;
+            prf.curr.joint.(name).(diagnosticName).(sc) = [];
+        end
+        summaries = {'mean','median','integrated'};
+        metrics = {'NSE','KGE','JKGE'};
+        for s = 1:numel(summaries)
+            summary = summaries{s};
+            for m = 1:numel(metrics)
+                metric = metrics{m};
+                prf.iter.joint.(name).(summary). ...
+                    (metric).(sc)(i) = NaN;
+            end
+        end
         components = {'r','alpha','beta'};
         for c = 1:numel(components)
             component = components{c};
             prf.iter.joint.(name).KGE_components. ...
+                (component).(sc)(i) = NaN;
+            prf.iter.joint.(name).mean.KGE_components. ...
+                (component).(sc)(i) = NaN;
+            prf.iter.joint.(name).median.KGE_components. ...
                 (component).(sc)(i) = NaN;
             prf.curr.joint.(name).KGE_components. ...
                 (component).(sc) = [];
@@ -669,8 +745,22 @@ function prf = local_store_empty_joint(prf,sc,i,names)
             component = components{c};
             prf.iter.joint.(name).JKGE_components. ...
                 (component).(sc)(i) = NaN;
+            prf.iter.joint.(name).mean.JKGE_components. ...
+                (component).(sc)(i) = NaN;
+            prf.iter.joint.(name).median.JKGE_components. ...
+                (component).(sc)(i) = NaN;
         end
         prf.iter.joint.(name).duration.(sc)(i) = NaN;
+        durationNames = {'S_fdc','S_p','S_logp'};
+        durationSummaries = {'mean','median','integrated'};
+        for d = 1:numel(durationNames)
+            durationName = durationNames{d};
+            for s = 1:numel(durationSummaries)
+                summary = durationSummaries{s};
+                prf.iter.joint.(name).duration_metrics. ...
+                    (durationName).(summary).(sc)(i) = NaN;
+            end
+        end
         prf.curr.joint.(name).NSE.(sc) = [];
         prf.curr.joint.(name).KGE.(sc) = [];
         prf.curr.joint.(name).JKGE.(sc) = [];

@@ -377,6 +377,13 @@ function R = region_registry()
         {'CH','CHE','SWISS','SWITZERLAND', ...
         'CAMELS_CH','CAMELS_SWITZERLAND'});
 
+    R(end+1) = reg('HYD_RESPONSES','HYD','Switzerland', ...
+        'Switzerland',[45.7 47.9],[5.8 10.6],'Switzerland', ...
+        "Bern",46.9480,7.4474, ...
+        300,50, ...
+        {'HYD','HYD_RESPONSES','HYD-RESPONSES', ...
+        'SWITZERLAND (HYD-RESPONSES)'});
+
     R(end+1) = reg('CAMELS_US','US','United States (CAMELS) [daily/hourly]', ...
         'United States of America',[26 49],[-124 -67], ...
         'CONUS', ...
@@ -439,6 +446,8 @@ function module = local_module_path(short)
             module=fullfile('KR',short);
         case {'US','USH','MACH'}
             module=fullfile('US',short);
+        case 'HYD'
+            module=fullfile('CH',short);
         otherwise
             module=short;
     end
@@ -685,6 +694,8 @@ function C = region_config_load(SAGEhydro,region)
             C = region_config_CA();
         case 'CH'
             C = region_config_CH();
+        case 'HYD'
+            C = region_config_HYD();
         case 'CL'
             C = region_config_CL();
         case 'COL'

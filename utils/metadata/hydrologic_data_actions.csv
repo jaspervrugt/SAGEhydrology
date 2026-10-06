@@ -2,6 +2,13 @@ region,resolution,gauge_id,variable,action,date,factor,reason,evidence,enabled
 CAMELS_IS,Daily,97,basin,exclude,,,documented gauge-basin mapping inconsistency,manual data review,true
 CAMELS_IL,Daily,30131,basin,exclude,,,non-closed karst/groundwater basin; mapped surface area does not represent the effective contributing area,manual hydrologic review,true
 CAMELS_NZ,Daily,19779,Q,scale,,0.001,source discharge is expressed in L/s rather than m3/s,3.98 km2 basin and runoff-ratio/unit consistency check,true
+HYD_RESPONSES,Daily,2206,Q,scale,,0.001,source discharge values are consistent with L/s rather than m3/s,uncorrected mean runoff = 3806 mm/day and runoff-to-precipitation ratio = 809,true
+HYD_RESPONSES,Daily,2251,Q,scale,,0.001,source discharge values are consistent with L/s rather than m3/s,uncorrected mean runoff = 4047 mm/day and runoff-to-precipitation ratio = 859,true
+HYD_RESPONSES,Daily,2252,Q,scale,,0.001,source discharge values are consistent with L/s rather than m3/s,uncorrected mean runoff = 2423 mm/day and runoff-to-precipitation ratio = 521,true
+HYD_RESPONSES,Daily,2282,Q,scale,,0.001,source discharge values are consistent with L/s rather than m3/s,uncorrected mean runoff = 2435 mm/day and runoff-to-precipitation ratio = 538,true
+HYD_RESPONSES,Daily,2283,Q,scale,,0.001,source discharge values are consistent with L/s rather than m3/s,uncorrected mean runoff = 2968 mm/day and runoff-to-precipitation ratio = 651,true
+HYD_RESPONSES,Daily,2414,Q,scale,,0.001,source discharge values are consistent with L/s rather than m3/s,uncorrected mean runoff = 2787 mm/day and runoff-to-precipitation ratio = 682,true
+HYD_RESPONSES,Daily,2437,Q,scale,,0.001,source discharge values are consistent with L/s rather than m3/s,uncorrected mean runoff = 2019 mm/day and runoff-to-precipitation ratio = 623,true
 HYDRO_CIS,Daily,2155,Q,scale,,0.001,source discharge values are consistent with L/s rather than m3/s,uncorrected mean Q = 1801 mm/day and maximum Q = 21600 mm/day,true
 HYDRO_CIS,Daily,2192,Q,scale,,0.001,source discharge values are consistent with L/s rather than m3/s,uncorrected mean Q = 2018 mm/day and maximum Q = 24118 mm/day,true
 HYDRO_CIS,Daily,2202,Q,scale,,0.001,source discharge values are consistent with L/s rather than m3/s,uncorrected mean Q = 939 mm/day and maximum Q = 20787 mm/day,true

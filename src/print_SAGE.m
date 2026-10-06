@@ -63,7 +63,122 @@ function [ax,frmt] = print_SAGE(mdl,ax,prf,i,dirres,loss,net)
     ax = print_figs(mdl,prf,i,prf.curr.NSE,prf.curr.KGE, ...
         fdcSkill,prf.curr.JKGE,loss_fnc,ax, ...
         fdcFormulation,fdcMetricName,loss);
+    local_apply_print_theme();
+    if isfield(ax,'fig') && isgraphics(ax.fig)
+        local_match_history_ticks(ax.fig);
+    end
 
+end
+
+function local_apply_print_theme()
+% Keep live diagnostics visually identical to standalone SAGE figures.
+    theme = sage_visual_theme();
+    figs = findall(groot,'Type','figure');
+    keep = false(size(figs));
+    for k = 1:numel(figs)
+        keep(k) = isprop(figs(k),'Number') ...
+            && isappdata(figs(k),'HistoryAxesHandles');
+    end
+    figs = figs(keep);
+    for k = 1:numel(figs)
+        fig = figs(k);
+        if isappdata(fig,'PrintSageThemeApplied') ...
+                && getappdata(fig,'PrintSageThemeApplied')
+            continue
+        end
+        axesObjects = findall(fig,'Type','axes');
+        axesObjects = axesObjects(~strcmpi(get(axesObjects,'Tag'),'legend'));
+        legends = findall(fig,'Type','legend');
+        equationText = findall(fig,'Type','text');
+        keepEquation = false(size(equationText));
+        for j = 1:numel(equationText)
+            try
+                value = strjoin(cellstr(string(equationText(j).String)),' ');
+                keepEquation(j) = contains(value,'$');
+            catch
+            end
+        end
+        equationText = equationText(keepEquation);
+        for j = 1:numel(axesObjects)
+            local_remember_print_font(axesObjects(j));
+            local_remember_print_font(axesObjects(j).Title);
+            local_remember_print_font(axesObjects(j).XLabel);
+            local_remember_print_font(axesObjects(j).YLabel);
+        end
+        for j = 1:numel(legends)
+            local_remember_print_font(legends(j));
+        end
+        for j = 1:numel(equationText)
+            local_remember_print_font(equationText(j));
+        end
+        sage_apply_figure_theme(fig,theme,'compact');
+        for j = 1:numel(axesObjects)
+            local_restore_print_font(axesObjects(j),3);
+            local_restore_print_font(axesObjects(j).Title,3);
+            local_restore_print_font(axesObjects(j).XLabel,3);
+            local_restore_print_font(axesObjects(j).YLabel,3);
+        end
+        for j = 1:numel(legends)
+            local_restore_print_font(legends(j),3);
+        end
+        for j = 1:numel(equationText)
+            local_restore_print_font(equationText(j),3);
+        end
+        local_restore_print_latex(fig);
+    local_restore_print_scenario_colors(fig);
+    local_match_history_ticks(fig);
+        setappdata(fig,'PrintSageThemeApplied',true);
+        layout_header_badges(fig);
+        if strcmp(fig.Visible,'off')
+            drawnow nocallbacks
+            fig.Visible = 'on';
+        end
+    end
+end
+
+function local_restore_print_scenario_colors(fig)
+% Restore scenario-colored ECDF frames and dual history y-axes.
+
+    if ~isappdata(fig,'PrintSageScenarioColors')
+        return
+    end
+    groups = getappdata(fig,'PrintSageScenarioColors');
+    leftAxes = groups.leftEcdf(isgraphics(groups.leftEcdf));
+    rightAxes = groups.rightEcdf(isgraphics(groups.rightEcdf));
+    dualAxes = groups.dualHistory(isgraphics(groups.dualHistory));
+    if ~isempty(leftAxes)
+        set(leftAxes,'XColor',groups.left,'YColor',groups.left);
+    end
+    if ~isempty(rightAxes)
+        set(rightAxes,'XColor',groups.right,'YColor',groups.right);
+    end
+    for j = 1:numel(dualAxes)
+        local_set_dual_axis_colors(dualAxes(j),groups.left,groups.right);
+    end
+end
+
+function local_remember_print_font(object)
+    if ~isappdata(object,'PrintSageBaseFontSize')
+        setappdata(object,'PrintSageBaseFontSize',double(object.FontSize));
+    end
+end
+
+function local_restore_print_font(object,increase)
+    object.FontSize = getappdata(object,'PrintSageBaseFontSize')+increase;
+end
+
+function local_restore_print_latex(fig)
+% Restore semantic LaTeX after any figure-wide or interactive restyling.
+    objects = findall(fig,'Type','text');
+    for j = 1:numel(objects)
+        try
+            value = strjoin(cellstr(string(objects(j).String)),' ');
+            if contains(value,'$')
+                objects(j).Interpreter = 'latex';
+            end
+        catch
+        end
+    end
 end
 
 function formulation = local_fdc_formulation(loss)
@@ -713,8 +828,6 @@ function frmt = local_print_joint_stats( ...
 
     cpuT = prf.iter.cpuT(i);
     printHeader = i == 1 || mod(i-1,25) == 0;
-    sep = repmat('-',1,105);
-
     J = prf.iter.joint;
     values = nan(numel(scens),9);
     for j = 1:numel(scens)
@@ -740,8 +853,6 @@ function frmt = local_print_joint_stats( ...
     scaledSWE = values(:,3)/sweScale;
 
     if printHeader
-        lead = sprintf(['\n%s\nit %4d   l %5d   ' ...
-            'CPU %5.1f s\n'],sep,i,l,cpuT);
         [cQ,cSWE,wQ,wSWE,sQ,sSWE] = ...
             local_joint_coefficients(loss);
         lossName = local_joint_loss_name(loss.fnc,fdcFormulation);
@@ -763,6 +874,11 @@ function frmt = local_print_joint_stats( ...
             'nse     kge   %6s     nse     kge   %6s\n'], ...
             qPow,swePow,durationQ,durationSWE);
         tableSep = repmat('-',1,numel(header));
+        % Use the table's computed width above and below the block.  A
+        % former fixed 105-character upper rule extended beyond the final
+        % SWE column for two-observation runs.
+        lead = sprintf(['\n%s\nit %4d   l %5d   ' ...
+            'CPU %5.1f s\n'],tableSep,i,l,cpuT);
         block = [lead dataLine formula whereQ whereSWE ...
             group header tableSep newline];
         fprintf('%s',block);
@@ -797,8 +913,6 @@ function frmt = local_print_named_stats( ...
     printHeader = i == 1 || mod(i-1,25) == 0;
     lossName = local_joint_loss_name(loss.fnc,fdcFormulation);
     if printHeader
-        lead = sprintf(['\n%s\nit %4d   l %5d   ' ...
-            'CPU %5.1f s\n'],repmat('-',1,105),i,l,cpuT);
         dataLine = sprintf(['data types: {%s}, loss function: ' ...
             '%s (loss = %d)\n'],strjoin(cellstr(names),','), ...
             lossName,loss.fnc);
@@ -825,8 +939,11 @@ function frmt = local_print_named_stats( ...
                 '%8s %8s'],['L_' name],['NSE_' name], ...
                 ['KGE_' name],['JKGE_' name])]; %#ok<AGROW>
         end
+        tableSep = repmat('-',1,numel(header));
+        lead = sprintf(['\n%s\nit %4d   l %5d   ' ...
+            'CPU %5.1f s\n'],tableSep,i,l,cpuT);
         block = [lead dataLine formula header newline ...
-            repmat('-',1,numel(header)) newline];
+            tableSep newline];
         fprintf('%s',block);
         fprintf(fid,'%s',block);
     else
@@ -980,7 +1097,7 @@ function ax = print_joint_figs(mdl,prf,i,loss,ax)
         string(loss.observed(:)))),'stable');
     names = names(strlength(names) > 0);
     if numel(names) ~= 2
-        ax = print_multi_loss_figs(mdl,prf,i,names,ax);
+        ax = print_multi_loss_figs(mdl,prf,i,loss,names,ax);
         return
     end
 
@@ -989,13 +1106,16 @@ function ax = print_joint_figs(mdl,prf,i,loss,ax)
     fnt_tit = 19;
     fnt_med = 16;
     fnt_leg = 18;
-    cT = [0 0 1];
-    cE = [0.00 0.55 0.00];
+    cT = local_ecdf_scenario_color('tt');
+    cE = local_ecdf_scenario_color('ee');
     cAx = [0.15 0.15 0.15];
     c = local_sage_model_color(mdl.model);
 
     [rightField,nameE,~,rightAvailable] = ...
         choose_joint_compare_scenario(prf,names,'period');
+    if rightAvailable
+        cE = local_ecdf_scenario_color(rightField);
+    end
     needInit = isempty(ax) || ~isstruct(ax) ...
         || ~isfield(ax,'fig') || ~isgraphics(ax.fig) ...
         || ~isfield(ax,'layout') ...
@@ -1006,6 +1126,7 @@ function ax = print_joint_figs(mdl,prf,i,loss,ax)
     end
 
     if needInit
+        local_delete_stale_print_figures();
         ax = struct('layout','joint');
         scr = get(0,'ScreenSize');
         figW = 0.95*scr(3);
@@ -1015,16 +1136,23 @@ function ax = print_joint_figs(mdl,prf,i,loss,ax)
         modelName = upper(local_print_model_name(mdl));
         ax.fig = figure('Units','pixels','Color','w', ...
             'Name',sprintf('%s: SAGE diagnostics',modelName), ...
+            'Tag','SAGEPrintDiagnostics', ...
             'NumberTitle','off', ...
+            'Visible','off', ...
             'Position',[figX figY figW figH], ...
             'SizeChangedFcn', ...
             @(src,evt) refresh_history_top_frames(src));
         setappdata(ax.fig,'SAGEPreserveCaptureSize',true);
         ax.flag = add_country_flag(ax.fig,mdl);
+        ax.timeResolution = add_time_resolution_icon(ax.fig,mdl);
+        layout_header_badges(ax.fig);
 
         marginL = 0.05;
         marginR = 0.05;
-        marginT = 0.04;
+        % Reserve a true header strip for the country and time-resolution
+        % badges.  With the former 0.04 margin, the top-row axes titles
+        % occupied the same vertical band as the badges.
+        marginT = 0.09;
         marginB = 0.115;
         gapX1 = 0.08;
         gapX2 = 0.08;
@@ -1067,7 +1195,8 @@ function ax = print_joint_figs(mdl,prf,i,loss,ax)
             hold(ah,'on');
         end
         set(ecdfAxes,'FontSize',fnt_ax,'LineWidth',1, ...
-            'TickDir','out','Box','off','Layer','top', ...
+            'TickDir','out','TickLength',[0.030 0.030], ...
+            'Box','off','Layer','top', ...
             'XLim',[-1 1],'YLim',[0 1]);
         set([ax.obs1_t ax.obs2_t],'XColor',cT,'YColor',cT);
         set([ax.obs1_r ax.obs2_r],'XColor',cE,'YColor',cE);
@@ -1083,19 +1212,27 @@ function ax = print_joint_figs(mdl,prf,i,loss,ax)
         end
         setappdata(ax.fig,'HistoryAxesHandles',historyAxes);
         setappdata(ax.fig,'HistoryTopFrameColor',cAx);
+        setappdata(ax.fig,'PrintSageScenarioColors',struct( ...
+            'left',cT,'right',cE, ...
+            'leftEcdf',[ax.obs1_t ax.obs2_t], ...
+            'rightEcdf',[ax.obs1_r ax.obs2_r], ...
+            'dualHistory',historyAxes));
 
         ax.totalLineT = local_joint_history_line( ...
             ax.totalAx,'left',cT,'-o',true);
         ax.totalLineR = local_joint_history_line( ...
             ax.totalAx,'right',cE,'-s',true);
+        local_set_dual_axis_colors(ax.totalAx,cT,cE);
         ax.obs1LineT = local_joint_history_line( ...
             ax.obs1Ax,'left',cT,'-o',false);
         ax.obs1LineR = local_joint_history_line( ...
             ax.obs1Ax,'right',cE,'-s',false);
+        local_set_dual_axis_colors(ax.obs1Ax,cT,cE);
         ax.obs2LineT = local_joint_history_line( ...
             ax.obs2Ax,'left',cT,'-o',false);
         ax.obs2LineR = local_joint_history_line( ...
             ax.obs2Ax,'right',cE,'-s',false);
+        local_set_dual_axis_colors(ax.obs2Ax,cT,cE);
         legend(ax.totalAx,'off');
 
         tags = {'obs1_t','obs1_r','obs2_t','obs2_r'};
@@ -1106,6 +1243,7 @@ function ax = print_joint_figs(mdl,prf,i,loss,ax)
                 'med_h',gobjects(1),'med_s',gobjects(1), ...
                 'med_txt',gobjects(1));
         end
+        local_hide_axes_toolbars(ax.fig);
     end
 
     title(ax.totalAx,'$\mathrm{History\ of\ total\ loss}$', ...
@@ -1148,10 +1286,10 @@ function ax = print_joint_figs(mdl,prf,i,loss,ax)
         title(leftAx,local_joint_ecdf_title( ...
             name,'Train basins | train period'), ...
             'Interpreter','latex','FontWeight','normal', ...
-            'FontSize',fnt_tit);
+            'FontSize',fnt_tit,'Color',cT);
         title(rightAx,local_joint_ecdf_title(name,nameE), ...
             'Interpreter','latex','FontWeight','normal', ...
-            'FontSize',fnt_tit);
+            'FontSize',fnt_tit,'Color',cE);
         ax = update_manual_ecdf(ax,leftTag,leftAx,zT, ...
             c,-1,1,0.20,1.4,'NSE','tt',fnt_med,name);
         if rightAvailable
@@ -1187,12 +1325,14 @@ function ax = print_joint_figs(mdl,prf,i,loss,ax)
     [obs2T,obs2R] = local_joint_history_pair( ...
         prf,char(names(2)),i,rightField,rightAvailable);
     rightScn = local_joint_scenario(rightField,rightAvailable);
+    totalLogT = should_use_log_loss_scale(totalT(:),numel(totalT));
+    totalLogR = should_use_log_loss_scale(totalR(:),numel(totalR));
     update_history_side(ax.totalAx,'left',ax.totalLineT, ...
         totalT,cT,'$L_{\mathrm{tot}}$', ...
-        fnt_lab,false,false);
+        fnt_lab,totalLogT,false);
     update_history_side(ax.totalAx,'right',ax.totalLineR, ...
         totalR,cE,'$L_{\mathrm{tot}}$', ...
-        fnt_lab,false,true);
+        fnt_lab,totalLogR,true);
     obs1LabT = local_joint_loss_label(loss,names(1),'tt');
     obs1LabR = local_joint_loss_label(loss,names(1),rightScn);
     obs2LabT = local_joint_loss_label(loss,names(2),'tt');
@@ -1233,47 +1373,140 @@ function ax = print_joint_figs(mdl,prf,i,loss,ax)
     end
 end
 
-function ax = print_multi_loss_figs(mdl,prf,i,names,ax)
-%PRINT_MULTI_LOSS_FIGS Plot total and component losses for 3+ variables.
+function ax = print_multi_loss_figs(mdl,prf,i,loss,names,ax)
+%PRINT_MULTI_LOSS_FIGS Plot one ECDF/history/ECDF row per observation.
 
-    cT = [0 0 1];
-    cE = [0.00 0.55 0.00];
+    nObs = numel(names);
+    fnt_ax = 15;
+    fnt_lab = 16;
+    fnt_tit = 17;
+    fnt_med = 14;
+    fnt_leg = 16;
+    cT = local_ecdf_scenario_color('tt');
+    cE = local_ecdf_scenario_color('ee');
+    cAx = [0.15 0.15 0.15];
+    c = local_sage_model_color(mdl.model);
     [rightField,nameE,~,rightAvailable] = ...
         choose_joint_compare_scenario(prf,names,'period');
+    if rightAvailable
+        cE = local_ecdf_scenario_color(rightField);
+    end
+    layoutName = sprintf('multi_%d',nObs);
     needInit = isempty(ax) || ~isstruct(ax) ...
         || ~isfield(ax,'fig') || ~isgraphics(ax.fig) ...
-        || ~isfield(ax,'layout') || ~strcmp(ax.layout,'multi');
+        || ~isfield(ax,'layout') || ~strcmp(ax.layout,layoutName);
     if needInit && isstruct(ax) ...
             && isfield(ax,'fig') && isgraphics(ax.fig)
         delete(ax.fig);
     end
+
     if needInit
-        ax = struct('layout','multi');
+        local_delete_stale_print_figures();
+        ax = struct('layout',layoutName);
         scr = get(0,'ScreenSize');
         ax.fig = figure('Units','pixels','Color','w', ...
             'Name',sprintf('%s: SAGE diagnostics', ...
             upper(local_print_model_name(mdl))), ...
+            'Tag','SAGEPrintDiagnostics', ...
             'NumberTitle','off', ...
-            'Position',[scr(1)+0.05*scr(3) scr(2)+0.05*scr(4) ...
-            0.9*scr(3) 0.9*scr(4)]);
-        ax.totalAx = subplot(2,1,1,'Parent',ax.fig);
-        ax.componentAx = subplot(2,1,2,'Parent',ax.fig);
+            'Visible','off', ...
+            'Position',[scr(1)+0.025*scr(3) scr(2)+0.025*scr(4) ...
+            0.95*scr(3) 0.95*scr(4)], ...
+            'SizeChangedFcn', ...
+            @(src,evt) refresh_history_top_frames(src));
+        setappdata(ax.fig,'SAGEPreserveCaptureSize',true);
+        ax.flag = add_country_flag(ax.fig,mdl);
+        ax.timeResolution = add_time_resolution_icon(ax.fig,mdl);
+        layout_header_badges(ax.fig);
+
+        marginL = 0.05;
+        marginR = 0.05;
+        marginT = 0.09;
+        marginB = 0.10;
+        gapX1 = 0.075;
+        gapX2 = 0.075;
+        gapY = 0.035;
+        nRows = nObs + 1;
+        rowH = (1-marginT-marginB-(nRows-1)*gapY)/nRows;
+        colW_ecdf = 0.175;
+        xL = marginL;
+        xR = 1-marginR-colW_ecdf;
+        xM = xL+colW_ecdf+gapX1;
+        wM = 0.92*(xR-gapX2-xM);
+        yTop = 1-marginT-rowH;
+
+        ax.totalAx = axes('Parent',ax.fig, ...
+            'Position',[xM yTop wM rowH]);
         hold(ax.totalAx,'on');
-        hold(ax.componentAx,'on');
+        init_history_axis(ax.totalAx,fnt_ax);
         ax.totalLineT = local_joint_history_line( ...
             ax.totalAx,'left',cT,'-o',true);
         ax.totalLineR = local_joint_history_line( ...
             ax.totalAx,'right',cE,'-s',true);
+        local_set_dual_axis_colors(ax.totalAx,cT,cE);
+        ax.obsLeft = gobjects(1,nObs);
+        ax.obsMid = gobjects(1,nObs);
+        ax.obsRight = gobjects(1,nObs);
+        ax.obsLineT = gobjects(1,nObs);
+        ax.obsLineR = gobjects(1,nObs);
+        ax.ecdf = struct();
+        for k = 1:nObs
+            y = yTop-k*(rowH+gapY);
+            ax.obsLeft(k) = axes('Parent',ax.fig, ...
+                'Position',[xL y colW_ecdf rowH]);
+            ax.obsMid(k) = axes('Parent',ax.fig, ...
+                'Position',[xM y wM rowH]);
+            ax.obsRight(k) = axes('Parent',ax.fig, ...
+                'Position',[xR y colW_ecdf rowH]);
+            hold(ax.obsLeft(k),'on');
+            hold(ax.obsMid(k),'on');
+            hold(ax.obsRight(k),'on');
+            set([ax.obsLeft(k) ax.obsRight(k)], ...
+                'FontSize',fnt_ax,'LineWidth',1,'TickDir','out', ...
+                'TickLength',[0.030 0.030], ...
+                'Box','off','Layer','top','XLim',[-1 1],'YLim',[0 1]);
+            set(ax.obsLeft(k),'XColor',cT,'YColor',cT);
+            set(ax.obsRight(k),'XColor',cE,'YColor',cE);
+            add_top_right_frame(ax.obsLeft(k),-1,1,0,1,cT);
+            add_top_right_frame(ax.obsRight(k),-1,1,0,1,cE);
+            init_history_axis(ax.obsMid(k),fnt_ax);
+            ax.obsLineT(k) = local_joint_history_line( ...
+                ax.obsMid(k),'left',cT,'-o',false);
+            ax.obsLineR(k) = local_joint_history_line( ...
+                ax.obsMid(k),'right',cE,'-s',false);
+            local_set_dual_axis_colors(ax.obsMid(k),cT,cE);
+            leftTag = sprintf('obs%d_t',k);
+            rightTag = sprintf('obs%d_r',k);
+            emptyEcdf = struct('patch',gobjects(1),'line',gobjects(1), ...
+                'med_v',gobjects(1),'med_h',gobjects(1), ...
+                'med_s',gobjects(1),'med_txt',gobjects(1));
+            ax.ecdf.(leftTag) = emptyEcdf;
+            ax.ecdf.(rightTag) = emptyEcdf;
+        end
+        historyAxes = [ax.totalAx ax.obsMid];
+        setappdata(ax.fig,'HistoryAxesHandles',historyAxes);
+        setappdata(ax.fig,'HistoryTopFrameColor',cAx);
+        setappdata(ax.fig,'PrintSageScenarioColors',struct( ...
+            'left',cT,'right',cE, ...
+            'leftEcdf',ax.obsLeft, ...
+            'rightEcdf',ax.obsRight, ...
+            'dualHistory',historyAxes));
+        local_hide_axes_toolbars(ax.fig);
     end
 
+    title(ax.totalAx,'$\mathrm{History\ of\ total\ loss}$', ...
+        'Interpreter','latex','FontWeight','normal','FontSize',fnt_tit);
     [totalT,totalR] = local_joint_history_pair( ...
         prf,'total',i,rightField,rightAvailable);
     rightScn = local_joint_scenario(rightField,rightAvailable);
+    totalLogT = should_use_log_loss_scale(totalT(:),numel(totalT));
+    totalLogR = should_use_log_loss_scale(totalR(:),numel(totalR));
     update_history_side(ax.totalAx,'left',ax.totalLineT, ...
-        totalT,cT,'$L_{\mathrm{tot},\mathrm{tt}}$',18,false,false);
+        totalT,cT,'$L_{\mathrm{tot},\mathrm{tt}}$', ...
+        fnt_lab,totalLogT,false);
     update_history_side(ax.totalAx,'right',ax.totalLineR, ...
-        totalR,cE,sprintf('$L_{\mathrm{tot},\mathrm{%s}}$', ...
-        rightScn),18,false,true);
+        totalR,cE,['$L_{\mathrm{tot},\mathrm{' rightScn '}}$'], ...
+        fnt_lab,totalLogR,true);
     if rightAvailable
         legendRight = nameE;
     else
@@ -1281,37 +1514,97 @@ function ax = print_multi_loss_figs(mdl,prf,i,names,ax)
     end
     local_top_history_legend(ax.totalAx, ...
         ax.totalLineT,ax.totalLineR,cT,cE, ...
-        'Train basins | train period',legendRight,16);
-    title(ax.totalAx,'History of total loss', ...
-        'Interpreter','none','FontSize',19);
+        'Train basins | train period',legendRight,fnt_leg);
 
-    cla(ax.componentAx);
-    hold(ax.componentAx,'on');
-    colors = lines(numel(names));
-    for k = 1:numel(names)
+    xmax = max([2 numel(totalT) numel(totalR)]);
+    for k = 1:nObs
         name = char(names(k));
+        leftTag = sprintf('obs%d_t',k);
+        rightTag = sprintf('obs%d_r',k);
+        zT = local_joint_current_nse(prf,name,'tt');
+        zR = [];
+        if rightAvailable
+            zR = local_joint_current_nse(prf,name,char(rightField));
+        end
+        [zT,~] = finite_vec(zT);
+        [zR,~] = finite_vec(zR);
+        title(ax.obsLeft(k),local_joint_ecdf_title( ...
+            name,'Train basins | train period'), ...
+            'Interpreter','latex','FontWeight','normal', ...
+            'FontSize',fnt_tit,'Color',cT);
+        title(ax.obsRight(k),local_joint_ecdf_title(name,nameE), ...
+            'Interpreter','latex','FontWeight','normal', ...
+            'FontSize',fnt_tit,'Color',cE);
+        title(ax.obsMid(k), ...
+            ['$\mathrm{History\ of\ ' name '\ loss}$'], ...
+            'Interpreter','latex','FontWeight','normal','FontSize',fnt_tit);
+        ax = update_manual_ecdf(ax,leftTag,ax.obsLeft(k),zT, ...
+            c,-1,1,0.20,1.4,'NSE','tt',fnt_med,name);
+        if rightAvailable
+            ax = update_manual_ecdf(ax,rightTag,ax.obsRight(k),zR, ...
+                c,-1,1,0.20,1.4,'NSE',char(rightField),fnt_med,name);
+        else
+            clear_manual_ecdf(ax,rightTag);
+            set_unavailable_label(ax.obsRight(k),true);
+        end
+        ylabel(ax.obsLeft(k), ...
+            local_joint_nse_label(name,'tt',true), ...
+            'Interpreter','latex','FontSize',fnt_lab);
+        ylabel(ax.obsRight(k), ...
+            local_joint_nse_label(name,rightScn,true), ...
+            'Interpreter','latex','FontSize',fnt_lab);
         [trainLoss,evalLoss] = local_joint_history_pair( ...
             prf,name,i,rightField,rightAvailable);
-        plot(ax.componentAx,1:numel(trainLoss),trainLoss, ...
-            '-o','Color',colors(k,:),'LineWidth',1.3, ...
-            'DisplayName',sprintf('%s tt',name));
-        if rightAvailable
-            plot(ax.componentAx,1:numel(evalLoss),evalLoss, ...
-                '--s','Color',colors(k,:),'LineWidth',1.3, ...
-                'DisplayName',sprintf('%s %s',name,nameE));
+        labT = local_joint_loss_label(loss,names(k),'tt');
+        labR = local_joint_loss_label(loss,names(k),rightScn);
+        update_dual_history_loss(ax.obsMid(k), ...
+            ax.obsLineT(k),ax.obsLineR(k),trainLoss,evalLoss,cT,cE, ...
+            labT,labR,fnt_lab);
+        xmax = max([xmax numel(trainLoss) numel(evalLoss)]);
+        if k < nObs
+            set([ax.obsLeft(k) ax.obsRight(k)],'XTickLabel',[]);
+            xlabel(ax.obsMid(k),'');
+        else
+            xlabel(ax.obsLeft(k), ...
+                local_joint_nse_label(name,'tt',false), ...
+                'Interpreter','latex','FontSize',fnt_lab);
+            xlabel(ax.obsRight(k), ...
+                local_joint_nse_label(name,rightScn,false), ...
+                'Interpreter','latex','FontSize',fnt_lab);
+            xlabel(ax.obsMid(k),'SAGE iteration, $i$', ...
+                'Interpreter','latex','FontSize',fnt_lab);
         end
     end
-    xlabel(ax.componentAx,'SAGE iteration, $i$', ...
-        'Interpreter','latex','FontSize',18);
-    ylabel(ax.componentAx,'Individual loss', ...
-        'Interpreter','none','FontSize',18);
-    title(ax.componentAx,'Observation-specific losses', ...
-        'Interpreter','none','FontSize',19);
-    set(ax.componentAx,'FontSize',17,'LineWidth',1, ...
-        'TickDir','out','Box','off');
-    legend(ax.componentAx,'Location','best','Box','off');
-    grid(ax.componentAx,'on');
-    drawnow limitrate nocallbacks
+    xt = local_history_xticks(xmax);
+    historyAxes = [ax.totalAx ax.obsMid];
+    for k = 1:numel(historyAxes)
+        xlim(historyAxes(k),[1 xmax]);
+        set_history_xticks(historyAxes(k),xt,k == numel(historyAxes));
+    end
+    if i == 1 || needInit
+        for ah = historyAxes
+            add_history_top_frame(ah,cAx);
+        end
+    end
+    if ~isdeployed
+        drawnow expose
+    else
+        drawnow limitrate nocallbacks
+    end
+end
+
+function label = local_joint_nse_label(name,scenario,includeCdf)
+%LOCAL_JOINT_NSE_LABEL Build valid LaTeX without SPRINTF escapes.
+
+    obs = upper(char(string(name)));
+    scn = lower(char(string(scenario)));
+    core = ['$\mathrm{NSE}^{\mathrm{' obs '}}_{\mathrm{' scn '}}$'];
+    if includeCdf
+        core = core(2:end-1);
+        label = ['$F(' core ')$'];
+    else
+        label = core;
+    end
 end
 
 function h = local_joint_history_line(axh,side,color,style,showLegend)
@@ -1331,6 +1624,38 @@ function h = local_joint_history_line(axh,side,color,style,showLegend)
     h = plot(axh,nan,nan,style,'Color',color, ...
         'MarkerFaceColor',color,'LineWidth',1.3, ...
         'DisplayName',label,'HandleVisibility',visibility);
+end
+
+function local_set_dual_axis_colors(axh,leftColor,rightColor)
+%LOCAL_SET_DUAL_AXIS_COLORS Fix train/evaluation ruler colors explicitly.
+
+    try
+        axh.YAxis(1).Color = leftColor;
+        axh.YAxis(2).Color = rightColor;
+    catch
+    end
+end
+
+function local_delete_stale_print_figures()
+%LOCAL_DELETE_STALE_PRINT_FIGURES Keep one live SAGE dashboard per run.
+
+    stale = findall(groot,'Type','figure', ...
+        'Tag','SAGEPrintDiagnostics');
+    allFigures = findall(groot,'Type','figure');
+    for k = 1:numel(allFigures)
+        try
+            if contains(lower(string(allFigures(k).Name)), ...
+                    'sage diagnostics')
+                stale(end+1,1) = allFigures(k); %#ok<AGROW>
+            end
+        catch
+        end
+    end
+    stale = unique(stale);
+    stale = stale(isgraphics(stale));
+    if ~isempty(stale)
+        delete(stale);
+    end
 end
 
 function local_top_history_legend( ...
@@ -1421,7 +1746,7 @@ function value = local_joint_ecdf_title(observable,label)
     parts = cellfun(@(x)strrep(x,' ','\ '), ...
         parts,'UniformOutput',false);
     if numel(parts) == 2
-        value = sprintf('$\\mathrm{%s:\\ %s}\\mid\\mathrm{%s}$', ...
+        value = sprintf('$\\mathrm{%s:\\ %s}\\;|\\;\\mathrm{%s}$', ...
             observable,parts{1},parts{2});
     else
         value = sprintf('$\\mathrm{%s:\\ %s}$', ...
@@ -1518,10 +1843,8 @@ function ax = print_figs(mdl,prf,i,NSE,KGE,S_fdc,JKGE,loss_fnc,ax, ...
     xL = -1; xR = 1;
     yL = 0;  yR = 1;
 
-    cT = [0 0 1];
-    %cE = [1 0.5 0];
-    %cE = [0.75 0.00 0.00]; % crimson: right y-axis
-    cE = [0.00 0.55 0.00]; 	% green
+    cT = local_ecdf_scenario_color('tt');
+    cE = local_ecdf_scenario_color('ee');
     cAx = [0.15 0.15 0.15]; % 2nd x-axis middle history panels
     
     % ----------------------
@@ -1593,6 +1916,9 @@ function ax = print_figs(mdl,prf,i,NSE,KGE,S_fdc,JKGE,loss_fnc,ax, ...
     % ------------------------------------------
     [rightField,nameE,klabel_right,rightAvailable] = ...
         choose_compare_scenario(prf,samp_word);
+    if rightAvailable
+        cE = local_ecdf_scenario_color(rightField);
+    end
     
     % ----------------
     % Pull metric data
@@ -1696,22 +2022,30 @@ function ax = print_figs(mdl,prf,i,NSE,KGE,S_fdc,JKGE,loss_fnc,ax, ...
         figX = scr(1) + 0.5 * (scr(3) - figW);
         figY = scr(2) + 0.5 * (scr(4) - figH);
         
+        local_delete_stale_print_figures();
         ax.fig = figure( ...
             'Units','pixels', ...
             'Color','w', ...
             'Name',sprintf('%s: SAGE diagnostics',mdl_name_disp), ...
+            'Tag','SAGEPrintDiagnostics', ...
             'NumberTitle','off', ...
+            'Visible','off', ...
             'Position',[figX figY figW figH], ...
             'SizeChangedFcn', ...
             @(src,evt) refresh_history_top_frames(src));
         setappdata(ax.fig,'SAGEPreserveCaptureSize',true);
         ax.flag = add_country_flag(ax.fig,mdl);
+        ax.timeResolution = add_time_resolution_icon(ax.fig,mdl);
+        layout_header_badges(ax.fig);
         % --------------------------------------------------------
         % Manual layout with more whitespace around history panels
         % --------------------------------------------------------
         marginL = 0.05;
         marginR = 0.05;
-        marginT = 0.04;
+        % Reserve a true header strip for the country and time-resolution
+        % badges.  With the former 0.04 margin, the top-row axes titles
+        % occupied the same vertical band as the badges.
+        marginT = 0.09;
         % Keep the bottom history tick labels and xlabel inside the figure
         % canvas during PNG/PPTX export.
         marginB = 0.115;
@@ -1777,6 +2111,12 @@ function ax = print_figs(mdl,prf,i,NSE,KGE,S_fdc,JKGE,loss_fnc,ax, ...
         ax.jkge_r = axes('Parent',ax.fig, ...
             'Position',[xRcol y3 colW_ecdf rowH]); 
         hold(ax.jkge_r,'on');
+        % Register scenario metadata after both ECDF columns exist.
+        setappdata(ax.fig,'PrintSageScenarioColors',struct( ...
+            'left',cT,'right',cE, ...
+            'leftEcdf',[ax.nse_t ax.kge_t ax.jkge_t], ...
+            'rightEcdf',[ax.nse_r ax.kge_r ax.jkge_r], ...
+            'dualHistory',[ax.lossAx ax.rssAx ax.sibAx]));
     
         % ECDF axes style
         ecdf_axes = [ax.nse_t ...
@@ -1965,8 +2305,8 @@ function ax = print_figs(mdl,prf,i,NSE,KGE,S_fdc,JKGE,loss_fnc,ax, ...
     
         % Only top history title
         title(ax.lossAx, ...
-            sprintf(['\\texttt{%s}: ' ...
-            'History of loss functions'],mdl_tex), ...
+            sprintf(['$\\texttt{%s}:\\;\\mathrm{History\\ of\\ ' ...
+            'loss\\ functions}$'],mdl_tex), ...
             'Interpreter','latex','FontSize',fnt_tit);
         title(ax.rssAx,'');
         title(ax.sibAx,'');
@@ -2048,6 +2388,7 @@ function ax = print_figs(mdl,prf,i,NSE,KGE,S_fdc,JKGE,loss_fnc,ax, ...
             ax.ecdf.(tg).med_txt = ...
                 gobjects(1);
         end
+        local_hide_axes_toolbars(ax.fig);
     end
 
     % Refresh these labels on every call so an existing dashboard follows
@@ -2428,42 +2769,33 @@ function set_panel_title(axh, ...
         showModel = true;
     end
     
-    if ~isAvailable
-        if showModel
-            axh.Title.String = ...
-                sprintf('%s: %s', ...
-                mdl_tex,str);
-        else
-            axh.Title.String = str;
-        end
-    elseif isempty(klabel)
-        if showModel
-            axh.Title.String = ...
-                sprintf('%s: %s', ...
-                mdl_tex,str);
-        else
-            axh.Title.String = str;
-        end
-    else
-        if showModel
-            axh.Title.String = ...
-                sprintf(['%s: %s ' ...
-                '($%s = %d$)'],mdl_tex, ...
-                str,klabel,K);
-        else
-            axh.Title.String = ...
-                sprintf('%s ($%s = %d$)', ...
-                str,klabel,K);
-        end
+    titleBody = local_panel_title_text(str);
+    if showModel
+        titleBody = sprintf('\\texttt{%s}:\\;%s',mdl_tex,titleBody);
+    end
+    if isAvailable && ~isempty(klabel)
+        titleBody = sprintf('%s\\;(%s=%d)',titleBody,klabel,K);
         if nFinite ~= K
-            axh.Title.String = sprintf( ...
-                '%s; $n_{\rm NSE} = %d$', ...
-                axh.Title.String,nFinite);
+            titleBody = sprintf('%s;\\;n_{\\mathrm{NSE}}=%d', ...
+                titleBody,nFinite);
         end
     end
+    axh.Title.String = ['$' titleBody '$'];
     axh.Title.Interpreter = 'latex';
     axh.Title.FontName = get(groot,'DefaultAxesFontName');
     axh.Title.FontSize = fnt;
+end
+
+function value = local_panel_title_text(value)
+%LOCAL_PANEL_TITLE_TEXT Convert a plain scenario title to valid LaTeX.
+    parts = strsplit(char(value),'|');
+    for k = 1:numel(parts)
+        parts{k} = strrep(strtrim(parts{k}),' ','\ ');
+        parts{k} = ['\mathrm{' parts{k} '}'];
+    end
+    % strjoin interprets escape sequences in its delimiter. Double the
+    % backslashes so the LaTeX spacing commands survive without warnings.
+    value = strjoin(parts,'\\;|\\;');
 end
 
 function h = add_top_right_frame(axh, ...
@@ -2509,6 +2841,8 @@ function ax = update_manual_ecdf(ax, ...
         observable = '';
     end
 
+    scenarioColor = local_ecdf_scenario_color(scn);
+
     if isempty(z)
         set_unavailable_label(axh,true);
         clear_manual_ecdf(ax,tag);
@@ -2550,19 +2884,19 @@ function ax = update_manual_ecdf(ax, ...
     if ~isgraphics(ax.ecdf.(tag).med_v)
         ax.ecdf.(tag).med_v = line(axh, ...
             nan,nan, ...
-            'Color','k', ...
+            'Color',scenarioColor, ...
             'LineWidth',1.0, ...
             'HandleVisibility','off');
         ax.ecdf.(tag).med_h = line(axh, ...
             nan,nan, ...
-            'Color','k', ...
+            'Color',scenarioColor, ...
             'LineWidth',1.0, ...
             'HandleVisibility','off');
         ax.ecdf.(tag).med_s = line(axh, ...
             nan,nan, ...
             'Marker','s', ...
-            'MarkerFaceColor','k', ...
-            'MarkerEdgeColor','k', ...
+            'MarkerFaceColor',scenarioColor, ...
+            'MarkerEdgeColor',scenarioColor, ...
             'LineStyle','none', ...
             'MarkerSize',5, ...
             'HandleVisibility','off');
@@ -2573,7 +2907,7 @@ function ax = update_manual_ecdf(ax, ...
             'FontWeight','bold', ...
             'HorizontalAlignment',ha, ...
             'VerticalAlignment','middle', ...
-            'Color','k', ...
+            'Color',scenarioColor, ...
             'HandleVisibility','off', ...
             'FontSize',fnt_med);
     end
@@ -2582,20 +2916,25 @@ function ax = update_manual_ecdf(ax, ...
         set(ax.ecdf.(tag).med_v, ...
             'XData',[xMark xMark], ...
             'YData',[0 yMark], ...
+            'Color',scenarioColor, ...
             'Visible','on');
     else
         set(ax.ecdf.(tag).med_v, ...
             'XData',[], ...
             'YData',[], ...
+            'Color',scenarioColor, ...
             'Visible','off');
     end
     set(ax.ecdf.(tag).med_h, ...
         'XData',[x1m x2m], ...
         'YData',[yMark yMark], ...
+        'Color',scenarioColor, ...
         'Visible','on');
     set(ax.ecdf.(tag).med_s, ...
         'XData',xMark, ...
         'YData',yMark, ...
+        'MarkerFaceColor',scenarioColor, ...
+        'MarkerEdgeColor',scenarioColor, ...
         'Visible','on');
     scnTex = lower(strtrim(char(string(scn))));
     if isempty(observable)
@@ -2612,12 +2951,25 @@ function ax = update_manual_ecdf(ax, ...
     set(ax.ecdf.(tag).med_txt, ...
         'Position',[xt yMark 0], ...
         'String',medLabel, ...
+        'Color',scenarioColor, ...
         'HorizontalAlignment',ha, ...
         'Visible','on', ...
         'FontSize',fnt_med);
     
     xlim(axh,[xL xR]);
     ylim(axh,[0 1]);
+    end
+
+    function color = local_ecdf_scenario_color(scn)
+    %LOCAL_ECDF_SCENARIO_COLOR Match ECDF annotations to scenario axes.
+
+    scenario = lower(strtrim(char(string(scn))));
+    theme = sage_visual_theme();
+    if isfield(theme.colors.scenario,scenario)
+        color = theme.colors.scenario.(scenario);
+    else
+        color = theme.colors.neutral.dark;
+    end
     end
     
     function clear_manual_ecdf(ax,tag)
@@ -2837,8 +3189,7 @@ function update_history_side(axh,side,hLine,y,clr, ...
 
     if scalePow ~= 0
         ylabel(axh, ...
-            sprintf('%s $\\times 10^{%d}$', ...
-            axisLabel,scalePow), ...
+            local_scaled_latex_label(axisLabel,scalePow), ...
             'Interpreter','latex', ...
             'FontSize',fsLab);
     else
@@ -2902,130 +3253,24 @@ function update_dual_history_loss(axh, ...
     hT,hR,yT,yR,cT,cE,leftLab, ...
     rightLab,fsLab)
 
-    % useLog = should_use_log_loss_scale([yT(:); yR(:)], ...
-    %     numel(yT));
     useLogT = should_use_log_loss_scale(yT(:),numel(yT));
     useLogR = should_use_log_loss_scale(yR(:),numel(yR));
-    useLog = useLogT || useLogR;
+    update_history_side(axh,'left',hT,yT,cT, ...
+        leftLab,fsLab,useLogT,false);
+    update_history_side(axh,'right',hR,yR,cE, ...
+        rightLab,fsLab,useLogR,true);
+end
 
-    if useLog
-        yyaxis(axh,'left');
-        try
-            axh.YAxis(1).Exponent = 0;
-        catch
-        end
-        axh.YColor = cT;
-        axh.YScale = 'log';
-        if isempty(yT)
-            set(hT,'XData',nan, ...
-                'YData',nan);
-        else
-            yTplot = yT;
-            yTplot(~isfinite(yTplot) ...
-                | yTplot <= 0) = nan;
-            set(hT,'XData',1:numel(yTplot), ...
-                'YData',yTplot);
-            local_set_dynamic_ylim_log(axh, ...
-                'left',yTplot);
-            local_no_axis_exponent(axh);
-        end
-        ylabel(axh,leftLab, ...
-            'Interpreter','latex', ...
-            'FontSize',fsLab);
-    
-        yyaxis(axh,'right');
-        try
-            axh.YAxis(2).Exponent = 0;
-        catch
-        end
-        axh.YColor = cE;
-        axh.YScale = 'log';
-        if isempty(yR)
-            set(hR,'XData',nan, ...
-                'YData',nan);
-            ylabel(axh,'Unavailable', ...
-                'Interpreter','none', ...
-                'FontSize',fsLab);
-        else
-            yRplot = yR;
-            yRplot(~isfinite(yRplot) ...
-                | yRplot <= 0) = nan;
-            set(hR,'XData',1:numel(yRplot), ...
-                'YData',yRplot);
-            local_set_dynamic_ylim_log(axh, ...
-                'right',yRplot);
-            local_no_axis_exponent(axh);
-            ylabel(axh,rightLab, ...
-                'Interpreter','latex', ...
-                'FontSize',fsLab);
-        end
-    else
-        %[pow,sc] = nice_eng_scale([yT(:); yR(:)]);
-        [powT,scT] = nice_eng_scale(yT(:));
-        [powR,scR] = nice_eng_scale(yR(:));
-        yyaxis(axh,'left');
-        try
-            axh.YAxis(1).Exponent = 0;
-        catch
-        end
-        axh.YColor = cT;
-        axh.YScale = 'linear';
-        if isempty(yT)
-            set(hT,'XData',nan, ...
-                'YData',nan);
-        else
-            yTplot = yT./scT;
-            set(hT,'XData',1:numel(yT), ...
-                'YData',yTplot);
-            local_set_dynamic_ylim(axh, ...
-                'left',yTplot);
-            local_no_axis_exponent(axh);
-        end
-        if powT ~= 0
-            ylabel(axh, ...
-                sprintf('%s $\\times 10^{%d}$', ...
-                leftLab,powT), ...
-                'Interpreter','latex', ...
-                'FontSize',fsLab);
-        else
-            ylabel(axh,leftLab, ...
-                'Interpreter','latex', ...
-                'FontSize',fsLab);
-        end
-    
-        yyaxis(axh,'right');
-        try
-            axh.YAxis(2).Exponent = 0;
-        catch
-        end
-        axh.YColor = cE;
-        axh.YScale = 'linear';
-        if isempty(yR)
-            set(hR,'XData',nan, ...
-                'YData',nan);
-            ylabel(axh,'Unavailable', ...
-                'Interpreter','none', ...
-                'FontSize',fsLab);
-        else
-            yRplot = yR./scR;
-            set(hR,'XData',1:numel(yR), ...
-                'YData',yRplot);
-            local_set_dynamic_ylim(axh, ...
-                'right',yRplot);
-            local_no_axis_exponent(axh);
-            if powR ~= 0
-                ylabel(axh, ...
-                    sprintf('%s $\\times 10^{%d}$', ...
-                    rightLab,powR), ...
-                    'Interpreter','latex', ...
-                    'FontSize',fsLab);
-            else
-                ylabel(axh,rightLab, ...
-                    'Interpreter','latex', ...
-                    'FontSize',fsLab);
-            end
-        end
+function label = local_scaled_latex_label(baseLabel,power)
+%LOCAL_SCALED_LATEX_LABEL Keep one valid LaTeX math environment.
+
+    core = char(string(baseLabel));
+    if numel(core) >= 2 ...
+            && core(1) == '$' ...
+            && core(end) == '$'
+        core = core(2:end-1);
     end
+    label = sprintf('$%s \\times 10^{%d}$',core,power);
 end
 
 function tf = should_use_log_loss_scale(y,nIter)
@@ -3037,7 +3282,7 @@ function tf = should_use_log_loss_scale(y,nIter)
         tf = false;
         return
     end
-    tf = (max(y) / min(y)) >= 100;
+    tf = (max(y) / min(y)) >= 10;
 end
 
 function h = add_history_top_frame(axh,clr)
@@ -3084,6 +3329,8 @@ function refresh_history_top_frames(fig)
     if ~isgraphics(fig)
         return
     end
+    layout_header_badges(fig);
+    local_match_history_ticks(fig);
     
     if ~isappdata(fig,'HistoryAxesHandles') ...
             || ~isappdata(fig,'HistoryTopFrameColor')
@@ -3099,6 +3346,22 @@ function refresh_history_top_frames(fig)
         add_history_top_frame(axs(k),clr);
     end
 
+end
+
+function local_match_history_ticks(fig)
+% Match tick lengths in pixels despite the wider history plot boxes.
+    if ~isappdata(fig,'PrintSageScenarioColors'), return, end
+    groups=getappdata(fig,'PrintSageScenarioColors');
+    refs=groups.leftEcdf(isgraphics(groups.leftEcdf));
+    history=groups.dualHistory(isgraphics(groups.dualHistory));
+    if isempty(refs), return, end
+    ref=refs(1); refPosition=getpixelposition(ref);
+    tickPixels=ref.TickLength(1)*max(refPosition(3:4));
+    for k=1:numel(history)
+        position=getpixelposition(history(k));
+        fraction=tickPixels/max(1,max(position(3:4)));
+        history(k).TickLength=[fraction fraction];
+    end
 end
 
 function set_history_xticks(axh,xt,showLabels)
@@ -3468,6 +3731,8 @@ function flagAx = add_country_flag(fig,mdl)
             short = 'DE';
         elseif strcmpi(regionCode,'BULL_ES')
             short = 'ES';
+        elseif strcmpi(regionCode,'HYD_RESPONSES')
+            short = 'CH';
         end
         projectRoot = fileparts(fileparts(mfilename('fullpath')));
         flagFile = fullfile(projectRoot,'flags', ...
@@ -3477,8 +3742,8 @@ function flagAx = add_country_flag(fig,mdl)
         end
         [rgb,~,alpha] = imread(flagFile);
         flagAx = axes('Parent',fig, ...
-            'Units','normalized', ...
-            'Position',[0.958 0.954 0.030 0.030], ...
+            'Units','pixels', ...
+            'Position',[1 1 32 32], ...
             'Visible','off','Color','none', ...
             'HandleVisibility','off','HitTest','off');
         h = image(flagAx,rgb);
@@ -3488,6 +3753,9 @@ function flagAx = add_country_flag(fig,mdl)
         h.HitTest = 'off';
         axis(flagAx,'image');
         axis(flagAx,'off');
+        setappdata(flagAx,'SAGEFlagAspect', ...
+            size(rgb,2)/max(1,size(rgb,1)));
+        setappdata(fig,'SAGEFlagAxes',flagAx);
     catch
         if ~isempty(flagAx) ...
                 && isgraphics(flagAx)
@@ -3497,10 +3765,173 @@ function flagAx = add_country_flag(fig,mdl)
     end
 end
 
+function iconAx = add_time_resolution_icon(fig,mdl)
+%ADD_TIME_RESOLUTION_ICON Add a labeled clock/calendar beside the flag.
+    iconAx = gobjects(0);
+    if ~isfield(mdl,'dt') || isempty(mdl.dt)
+        return
+    end
+    dt = double(mdl.dt(1));
+    if ~ismember(dt,[1 24 96])
+        return
+    end
+    try
+        iconAx = axes('Parent',fig, ...
+            'Units','pixels', ...
+            'Position',[1 1 34 34], ...
+            'XLim',[-1 1],'YLim',[-1 1], ...
+            'DataAspectRatio',[1 1 1], ...
+            'Visible','off','Color','none', ...
+            'HandleVisibility','off','HitTest','off');
+        hold(iconAx,'on');
+        ink = [0.13 0.13 0.13];
+        accent = [0.44 0.17 0.57];
+        if dt == 1
+            rectangle(iconAx,'Position',[-0.82 -0.78 1.64 1.56], ...
+                'Curvature',0.16,'FaceColor','w', ...
+                'EdgeColor',ink,'LineWidth',1.25,'HitTest','off');
+            line(iconAx,[-0.82 0.82],[0.30 0.30], ...
+                'Color',ink,'LineWidth',1.25,'HitTest','off');
+            line(iconAx,[-0.40 -0.40],[0.60 0.90], ...
+                'Color',ink,'LineWidth',1.6,'HitTest','off');
+            line(iconAx,[0.40 0.40],[0.60 0.90], ...
+                'Color',ink,'LineWidth',1.6,'HitTest','off');
+            rectangle(iconAx,'Position',[-0.25 -0.17 0.50 0.40], ...
+                'Curvature',0.12,'FaceColor',accent, ...
+                'EdgeColor','none','HitTest','off');
+            text(iconAx,0,0.02,'1','HorizontalAlignment','center', ...
+                'VerticalAlignment','middle','Color','w', ...
+                'FontName','Arial','FontWeight','bold','FontSize',7, ...
+                'Interpreter','none','HitTest','off');
+            text(iconAx,0,-0.55,'1-day','HorizontalAlignment','center', ...
+                'VerticalAlignment','middle','Color',ink, ...
+                'FontName','Arial','FontWeight','bold','FontSize',5.5, ...
+                'Interpreter','none','HitTest','off');
+        else
+            rectangle(iconAx,'Position',[-0.86 -0.86 1.72 1.72], ...
+                'Curvature',[1 1],'FaceColor','w', ...
+                'EdgeColor',ink,'LineWidth',1.25,'HitTest','off');
+            for angle = 0:90:270
+                u = [sind(angle) cosd(angle)];
+                line(iconAx,[0.70 0.82]*u(1),[0.70 0.82]*u(2), ...
+                    'Color',[0.35 0.35 0.35], ...
+                    'LineWidth',0.8,'HitTest','off');
+            end
+            center = [0 0.12];
+            if dt == 96
+                line(iconAx,[center(1) 0.62],[center(2) center(2)], ...
+                    'Color',ink,'LineWidth',1.5,'HitTest','off');
+                line(iconAx,[center(1) 0],[center(2) 0.48], ...
+                    'Color',ink,'LineWidth',1.5,'HitTest','off');
+                label = '15-min';
+            else
+                line(iconAx,[center(1) 0],[center(2) 0.66], ...
+                    'Color',ink,'LineWidth',1.5,'HitTest','off');
+                line(iconAx,[center(1) 0.30],[center(2) 0.48], ...
+                    'Color',ink,'LineWidth',1.5,'HitTest','off');
+                label = '1-hour';
+            end
+            plot(iconAx,center(1),center(2),'o', ...
+                'MarkerSize',3,'MarkerFaceColor',accent, ...
+                'MarkerEdgeColor',accent,'HitTest','off');
+            text(iconAx,0,-0.50,label,'HorizontalAlignment','center', ...
+                'VerticalAlignment','middle','Color',ink, ...
+                'FontName','Arial','FontWeight','bold','FontSize',5.5, ...
+                'Interpreter','none','HitTest','off');
+        end
+        hold(iconAx,'off');
+        setappdata(fig,'SAGETimeResolutionAxes',iconAx);
+    catch
+        if ~isempty(iconAx) && isgraphics(iconAx)
+            delete(iconAx);
+        end
+        iconAx = gobjects(0);
+    end
+end
+
+function layout_header_badges(fig)
+%LAYOUT_HEADER_BADGES Keep visible flag/icon spacing independent of shape.
+
+    if ~isgraphics(fig)
+        return
+    end
+    flagAx = getappdata(fig,'SAGEFlagAxes');
+    iconAx = getappdata(fig,'SAGETimeResolutionAxes');
+    if isempty(flagAx) || ~isgraphics(flagAx) ...
+            || isempty(iconAx) || ~isgraphics(iconAx)
+        return
+    end
+    try
+        oldUnits = fig.Units;
+        fig.Units = 'pixels';
+        figPos = fig.Position;
+        fig.Units = oldUnits;
+        width = max(1,figPos(3));
+        height = max(1,figPos(4));
+        iconSize = max(28,min(42,round(0.030*height)));
+        flagHeight = max(26,min(38,round(0.026*height)));
+        aspect = getappdata(flagAx,'SAGEFlagAspect');
+        if isempty(aspect) || ~isfinite(aspect) || aspect <= 0
+            aspect = 1.5;
+        end
+        flagWidth = flagHeight*aspect;
+        rightMargin = max(14,round(0.018*width));
+        gap = max(8,round(0.004*width));
+        topMargin = max(8,round(0.010*height));
+        iconX = width-rightMargin-iconSize;
+        iconY = height-topMargin-iconSize;
+        flagX = iconX-gap-flagWidth;
+        flagY = iconY+0.5*(iconSize-flagHeight);
+        iconAx.Units = 'pixels';
+        iconAx.Position = [iconX iconY iconSize iconSize];
+        flagAx.Units = 'pixels';
+        flagAx.Position = [flagX flagY flagWidth flagHeight];
+        % Fit labels inside the circular badge at its actual pixel size.
+        % The lower clock chord is narrower than the badge diameter.
+        badgeText=findall(iconAx,'Type','text');
+        for textIndex=1:numel(badgeText)
+            labelHandle=badgeText(textIndex);
+            if ~ismember(string(labelHandle.String),["1-day","1-hour","15-min"])
+                continue
+            end
+            labelHandle.FontName='Arial';
+            labelHandle.FontUnits='pixels';
+            labelHandle.FontSize=min(8,0.24*iconSize);
+            labelHandle.HorizontalAlignment='center';
+            labelHandle.VerticalAlignment='middle';
+            allowedWidth=0.60*iconSize;
+            previousTextUnits=labelHandle.Units;
+            labelHandle.Units='pixels';
+            extent=labelHandle.Extent;
+            if extent(3)>allowedWidth
+                labelHandle.FontSize=labelHandle.FontSize*allowedWidth/extent(3);
+            end
+            labelHandle.Units=previousTextUnits;
+        end
+    catch
+    end
+end
+
+function local_hide_axes_toolbars(fig)
+% Keep axes hover controls out of the dashboard and exported snapshots.
+% The controls otherwise occupy the same header area as titles and badges.
+    axs = findall(fig,'Type','axes');
+    for k = 1:numel(axs)
+        try
+            axs(k).Toolbar.Visible = 'off';
+        catch
+            % Older MATLAB releases do not expose an axes toolbar.
+        end
+    end
+end
+
 function name = local_print_model_name(mdl)
     if isfield(mdl,'variant') ...
             && strcmpi(string(mdl.variant),'gchm_ode')
         name = 'gchm_ode';
+    elseif double(mdl.model(1)) == 99 ...
+            && isfield(mdl,'name') && ~isempty(mdl.name)
+        name = char(string(mdl.name));
     else
         name = sage_model_name(mdl.model);
     end

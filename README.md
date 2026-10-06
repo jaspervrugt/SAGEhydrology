@@ -1,5 +1,7 @@
 # SAGEhydrology
 
+Current public release: [v1.0.3](https://github.com/jaspervrugt/SAGEhydrology/releases/tag/v1.0.3). See [release notes](docs/RELEASE_v1.0.3.md) for the Windows deployment and source changes.
+
 Sensitivity-Aware Gradient Estimation (SAGE) is a framework for scalable,
 attribute-conditioned training of conceptual hydrologic models using analytic
 forward sensitivities.
@@ -28,14 +30,15 @@ regional workflows.
 
 ```text
 docs/                    Documentation graphics and model schematics
-examples/demo_SAGE.mlx   Illustrated SAGE Live Script
+examples/                Three public MATLAB examples, including demo_SAGE.mlx
 flags/                   Regional flag assets
 maps/                    Map assets and Natural Earth metadata
 models/                  Hydrologic models and analytic sensitivity kernels
 regions/                 Regional configuration and basin inventories
-results/                 Empty destination for generated run results
+projects/                Reproducible MATLAB scripts for Projects 1–5
 src/                     Main SAGE training and postprocessing routines
 utils/                   Shared readers, metrics, plotting, and utilities
+user_model/              Manual C++ model template and parameter metadata
 ```
 
 Hydrologic and meteorological datasets, run results, caches, and GUI source
@@ -113,3 +116,16 @@ remain subject to their respective licenses.
 Jasper A. Vrugt  
 University of California, Irvine  
 jasper@uci.edu
+
+## Project scripts and custom models
+
+The `projects/` directory contains the public MATLAB scripts for Projects 1–5.
+The `examples/` directory contains only the three standard examples. Run these
+scripts in MATLAB with the SAGE source on the MATLAB path and configure the
+local data paths before starting a run.
+
+For the compiled application, copy `user_model/` beside `SAGE.exe`, alongside
+`Data/` and `SAGEhydrology/`. Compile the C++ template externally in MATLAB for
+the target operating system, update its parameter metadata, and restart SAGE
+to use a replacement model. The public template supports manual model creation;
+AI-assisted model authoring and private models are excluded.

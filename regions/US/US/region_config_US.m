@@ -197,12 +197,15 @@ function S = local_meteo_schema()
             D.variables.P = local_variable('prcp(mm/day)','mm/day','mm/day');
             D.variables.Tmin = local_variable('tmin(C)','degC','degC');
             D.variables.Tmax = local_variable('tmax(C)','degC','degC');
+            D.variables.DayLength = local_variable('dayl(s)','s','s');
             D.variables.Radiation = local_variable('srad(W/m2)','W/m2','W/m2');
+            D.variables.Radiation.averaging = 'daylight';
             D.variables.VaporPressure = local_variable('vp(Pa)','Pa','Pa');
             if data > 1
                 D.variables.P.source = 'PRCP(mm/day)';
                 D.variables.Tmin.source = 'Tmin(C)';
                 D.variables.Tmax.source = 'Tmax(C)';
+                D.variables.DayLength.source = 'Dayl(s)';
                 D.variables.Radiation.source = 'SRAD(W/m2)';
                 D.variables.VaporPressure.source = 'Vp(Pa)';
             end

@@ -31,7 +31,7 @@ function states = model_states(mdl,Z,requested,nq)
 %
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-    if ismember(mdl.model,[11 99])
+    if ismember(mdl.model,[11 12 99])
         % A user model can have a parameter-dependent number
         % of routing-memory states known only after solver preparation.
         d = numel(mdl.th_min);
@@ -129,7 +129,7 @@ function [names,units] = local_catalog(mdl,nstate)
                 "soil_storage", ...
                 "groundwater_storage", ...
                 compose("routing_storage_%d",1:n)];
-        case 11
+        case {11,12}
             if isfield(mdl,'state_name')
                 names = string(mdl.state_name(1:nstate));
             else
@@ -147,7 +147,7 @@ function [names,units] = local_catalog(mdl,nstate)
     end
     names = string(names(:)); 
     units = repmat("mm",nstate,1);
-    if mdl.model == 11 && isfield(mdl,'state_units')
+    if ismember(mdl.model,[11 12]) && isfield(mdl,'state_units')
         units = string(mdl.state_units(1:nstate));
     end
     expected = nstate;

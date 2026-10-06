@@ -1,0 +1,21 @@
+{
+  "id": "P05",
+  "name": "5: Switzerland multivariable",
+  "kind": "sage",
+  "status": "ready",
+  "summary": "Daily Switzerland HYD-RESPONSES experiment fitting discharge, snow-water equivalent, and soil moisture jointly with HBV.",
+  "paper_title": "Beyond Streamflow: Dual- and Triple-Response Hydrologic Learning across Switzerland with SAGE",
+  "authors": "",
+  "abstract": "Large-sample hydrologic models are commonly trained against streamflow alone, even though internal water-storage dynamics remain weakly constrained by discharge at the catchment outlet. This study investigates whether multivariable training improves the realism, identifiability, and spatial transferability of attribute-conditioned conceptual hydrologic models. We apply Sensitivity-Aware Gradient Estimation (SAGE) to 184 Swiss catchments from the HYD-RESPONSES dataset and compare streamflow-only training with dual-response objectives based on discharge and snow-water equivalent, discharge and soil moisture, and a triple-response objective that combines discharge, snow-water equivalent, and root-zone soil-water storage. Analytic forward sensitivities propagate information from each observed response through the hydrologic model and the catchment-attribute neural network, enabling efficient joint optimization without finite-difference perturbations or automatic differentiation through the complete simulation history. Response-specific losses are normalized before weighting so that variables with different units and magnitudes contribute comparably to the total objective. Performance is evaluated for temporal, spatial, and spatiotemporal transfer using distributional scores, hydrograph diagnostics, snow-storage dynamics, and soil-water behavior. The experiments are designed to reveal when additional state observations improve streamflow prediction, when trade-offs arise between response variables, and whether multivariable constraints produce more physically coherent and transferable parameter regionalizations across Switzerland's strong climatic and elevational gradients. The resulting framework provides a reproducible basis for evaluating dual- and triple-response learning in large-sample differentiable hydrology.",
+  "reference": "Working Project 5 study; publication reference not yet available.",
+  "paper_url": "",
+  "setup_file": "setup.json",
+  "source_export": "run_SAGE_export_project_05.m",
+  "notes": [
+    "Region: Switzerland; dataset: HYD-RESPONSES; resolution: daily.",
+    "Model: HBV. Data types: discharge, snow-water equivalent, and soil moisture.",
+    "Basins: prescribed file split with 150 training and 34 evaluation basins.",
+    "Training: 01 Jan 2007 to 31 Dec 2014; evaluation: 01 Jan 2015 to 31 Dec 2022.",
+    "The loaded setup uses equal normalized weights for Q, SWE, and SM; dual-response variants can be obtained by clearing either SWE or SM on the Loss tab."
+  ]
+}

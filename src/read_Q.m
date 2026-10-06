@@ -18,6 +18,7 @@ function dat = read_Q(region,dirQ,mdl,dat,bas,split,aux)
 %                    'CAMELS_BR'  = Brazil
 %                    'CAMELS_CA'  = Canada
 %                    'CAMELS_CH'  = Switzerland
+%                    'HYD_RESPONSES' = Switzerland HYD-RESPONSES
 %                    'CAMELS_CL'  = Chile
 %                    'CAMELS_COL' = Colombia
 %                    'CAMELS_CZ'  = Czechia

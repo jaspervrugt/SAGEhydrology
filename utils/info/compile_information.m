@@ -1,4 +1,4 @@
-function mexFile = compile_information(force)
+function mexFile = compile_information(force,outputDir)
 %COMPILE_INFORMATION Compile the native SAGE Information diagnostic kernel.
 %
 %   mexFile = compile_information()
@@ -37,9 +37,11 @@ function mexFile = compile_information(force)
     end
 
     here = fileparts(mfilename('fullpath'));
+    if nargin<2 || isempty(outputDir), outputDir=here; end
+    if ~isfolder(outputDir), mkdir(outputDir); end
     sourceFile = fullfile(here, ...
         'sage_information_bottleneck_mex.cpp');
-    mexFile = fullfile(here, ...
+    mexFile = fullfile(outputDir, ...
         ['sage_information_bottleneck_mex.' mexext]);
 
     assert(isfile(sourceFile), ...
@@ -80,7 +82,7 @@ function mexFile = compile_information(force)
     catch
     end
 
-    baseArgs = {'-R2018a','-O','-outdir',here,sourceFile};
+    baseArgs = {'-R2018a','-O','-outdir',outputDir,sourceFile};
 
     % openmpArgs = baseArgs;
     % openmpNote = "serial";

@@ -36,6 +36,14 @@ function [dat,aux] = read_meteo_data(dirM,bas,split,meteo,schema)
         mode = 'both';
     end
     schema = validate_hydro_schema(schema,mode);
+    % Some combined forcing files also contain discharge. Apply curated
+    % basin-specific data actions during this first read; the subsequent
+    % discharge reader is allowed to reuse the canonical Q already stored
+    % in DAT and therefore cannot be relied upon to apply them later.
+    if isfield(bas,'data_actions') ...
+            && ~isempty(bas.data_actions)
+        schema.data_actions = bas.data_actions;
+    end
     [dat,aux] = read_hydro_timeseries( ...
         dirM,bas,split,meteo,schema);
 end

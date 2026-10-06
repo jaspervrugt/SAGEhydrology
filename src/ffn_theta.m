@@ -277,6 +277,23 @@ function [phi,net] = local_initialize_phi(net)
         phi.b{li} = zeros(no,1);
     end
 
+    % Optional model-specific output prior. Other networks keep the exact
+    % original initialization and RNG sequence above.
+    if isfield(net,'initial_output') && ~isempty(net.initial_output)
+        prior=double(net.initial_output(:));
+        if numel(prior)~=d || any(~isfinite(prior) | prior<=0 | prior>=1)
+            error('ffn_theta:InitialOutput','initial_output must contain d values strictly in (0,1).');
+        end
+        outputScale=0;
+        if isfield(net,'initial_output_weight_scale')
+            outputScale=double(net.initial_output_weight_scale);
+        end
+        if ~isscalar(outputScale) || ~isfinite(outputScale) || outputScale<0 || outputScale>1
+            error('ffn_theta:InitialOutputScale','Output initialization scale must be in [0,1].');
+        end
+        phi.W{end}=outputScale*phi.W{end};
+        phi.b{end}=log(prior./(1-prior));
+    end
     net.r = r;
     net.d = d;
     net.h = h;

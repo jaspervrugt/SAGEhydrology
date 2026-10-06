@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="520" viewBox="0 0 1400 520">
+  <title>SAGE four-step sensitivity-aware training framework</title>
+  <desc>Basin attributes are mapped by a neural network to conceptual-model parameters. Analytic sensitivities propagate through the hydrologic model and its loss to update the network.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f8fbfd"/><stop offset="1" stop-color="#eef5f4"/>
+    </linearGradient>
+    <linearGradient id="brain" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1676b8"/><stop offset="0.5" stop-color="#28a57a"/><stop offset="1" stop-color="#6f4cc3"/>
+    </linearGradient>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#24465d"/>
+    </marker>
+    <marker id="waterArrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#1976b9"/>
+    </marker>
+    <filter id="shadow" x="-15%" y="-15%" width="130%" height="140%">
+      <feDropShadow dx="0" dy="3" stdDeviation="4" flood-color="#17384b" flood-opacity="0.16"/>
+    </filter>
+    <style>
+      .title{font:700 25px Arial,sans-serif;fill:#17384b}.subtitle{font:15px Arial,sans-serif;fill:#4b6574}
+      .card{fill:#fff;stroke:#b8cbd4;stroke-width:1.4}.step{font:700 14px Arial,sans-serif;fill:#fff}
+      .head{font:700 18px Arial,sans-serif;fill:#17384b}.body{font:14px Arial,sans-serif;fill:#365262}
+      .small{font:12px Arial,sans-serif;fill:#46616f}.math{font:italic 16px Georgia,serif;fill:#17384b}
+      .flow{fill:none;stroke:#24465d;stroke-width:2.4;marker-end:url(#arrow)}
+      .net{stroke:#688a99;stroke-width:1.15;opacity:.75}.node{stroke:#fff;stroke-width:1.4}
+    </style>
+  </defs>
+
+  <rect width="1400" height="520" rx="16" fill="url(#bg)"/>
+  <text x="700" y="36" text-anchor="middle" class="title">SAGE — Sensitivity-Aware Gradient Estimation</text>
+  <text x="700" y="59" text-anchor="middle" class="subtitle">A differentiable four-step cycle for large-sample training of conceptual hydrologic models</text>
+
+  <!-- Step 1: attributes and FFN -->
+  <g filter="url(#shadow)">
+    <rect class="card" x="38" y="91" width="355" height="174" rx="14"/>
+    <circle cx="65" cy="115" r="17" fill="#1676b8"/><text x="65" y="120" text-anchor="middle" class="step">1</text>
+    <text x="92" y="121" class="head">Attributes → model parameters</text>
+    <g transform="translate(67,145)">
+      <rect x="0" y="0" width="88" height="93" rx="8" fill="#edf5fa" stroke="#9bbdce"/>
+      <text x="44" y="18" text-anchor="middle" class="small">Basin attributes</text>
+      <text x="44" y="40" text-anchor="middle" class="math">a₁  a₂  a₃</text>
+      <text x="44" y="62" text-anchor="middle" class="math">⋮</text><text x="44" y="82" text-anchor="middle" class="math">aₘ</text>
+      <g class="net">
+        <line x1="105" y1="17" x2="154" y2="13"/><line x1="105" y1="17" x2="154" y2="46"/><line x1="105" y1="48" x2="154" y2="13"/><line x1="105" y1="48" x2="154" y2="79"/><line x1="105" y1="79" x2="154" y2="46"/><line x1="105" y1="79" x2="154" y2="79"/>
+        <line x1="154" y1="13" x2="204" y2="28"/><line x1="154" y1="46" x2="204" y2="28"/><line x1="154" y1="46" x2="204" y2="65"/><line x1="154" y1="79" x2="204" y2="65"/>
+      </g>
+      <g fill="#1676b8"><circle class="node" cx="105" cy="17" r="7"/><circle class="node" cx="105" cy="48" r="7"/><circle class="node" cx="105" cy="79" r="7"/></g>
+      <g fill="#28a57a"><circle class="node" cx="154" cy="13" r="8"/><circle class="node" cx="154" cy="46" r="8"/><circle class="node" cx="154" cy="79" r="8"/></g>
+      <g fill="#e7a72c"><circle class="node" cx="204" cy="28" r="8"/><circle class="node" cx="204" cy="65" r="8"/></g>
+      <text x="251" y="33" class="math">θ = g<tspan baseline-shift="sub" font-size="11">φ</tspan>(a)</text>
+      <text x="251" y="59" class="small">shared network</text><text x="251" y="76" class="small">across basins</text>
+    </g>
+  </g>
+
+  <!-- Step 2: conceptual model -->
+  <g filter="url(#shadow)">
+    <rect class="card" x="1007" y="91" width="355" height="174" rx="14"/>
+    <circle cx="1034" cy="115" r="17" fill="#28a57a"/><text x="1034" y="120" text-anchor="middle" class="step">2</text>
+    <text x="1061" y="121" class="head">Conceptual hydrologic model</text>
+    <g transform="translate(1034,140)">
+      <path d="M8 33 L58 5 L108 33 Z" fill="#dbe8ed" stroke="#7797a5"/><path d="M28 22 L58 5 L76 15 L65 17 L58 13 L50 21 Z" fill="#fff"/>
+      <line x1="58" y1="3" x2="58" y2="39" stroke="#1976b9" stroke-width="2" marker-end="url(#waterArrow)"/>
+      <text x="8" y="55" class="small">P, E<tspan baseline-shift="sub" font-size="9">p</tspan>, T</text>
+      <rect x="128" y="0" width="124" height="28" rx="5" fill="#e8f3fa" stroke="#6ca2bf"/><text x="190" y="19" text-anchor="middle" class="small">Snow storage S<tspan baseline-shift="sub" font-size="9">s</tspan></text>
+      <rect x="128" y="42" width="124" height="28" rx="5" fill="#f4ead2" stroke="#b49355"/><text x="190" y="61" text-anchor="middle" class="small">Soil storage S<tspan baseline-shift="sub" font-size="9">u</tspan></text>
+      <rect x="128" y="84" width="124" height="28" rx="5" fill="#dcecf2" stroke="#638da1"/><text x="190" y="103" text-anchor="middle" class="small">Groundwater S<tspan baseline-shift="sub" font-size="9">g</tspan></text>
+      <path d="M190 28 V42 M190 70 V84 M252 98 H296" fill="none" stroke="#1976b9" stroke-width="2" marker-end="url(#waterArrow)"/>
+      <text x="270" y="91" class="math">Q</text>
+      <text x="3" y="85" class="math">dx/dt = f(x, θ, u)</text><text x="3" y="108" class="math">q = h(x, θ)</text>
+    </g>
+  </g>
+
+  <!-- Step 3: sensitivities -->
+  <g filter="url(#shadow)">
+    <rect class="card" x="1007" y="320" width="355" height="163" rx="14"/>
+    <circle cx="1034" cy="344" r="17" fill="#6f4cc3"/><text x="1034" y="349" text-anchor="middle" class="step">3</text>
+    <text x="1061" y="350" class="head">Propagate analytic sensitivities</text>
+    <text x="1035" y="389" class="math">d/dt (∂x/∂θ) = (∂f/∂x)(∂x/∂θ) + ∂f/∂θ</text>
+    <text x="1035" y="424" class="math">∂q/∂θ = (∂h/∂x)(∂x/∂θ) + ∂h/∂θ</text>
+    <text x="1035" y="458" class="body">Exact derivatives follow every state and flux—</text>
+    <text x="1035" y="477" class="body">without numerical perturbations.</text>
+  </g>
+
+  <!-- Step 4: objective and update -->
+  <g filter="url(#shadow)">
+    <rect class="card" x="38" y="320" width="355" height="163" rx="14"/>
+    <circle cx="65" cy="344" r="17" fill="#e07a36"/><text x="65" y="349" text-anchor="middle" class="step">4</text>
+    <text x="92" y="350" class="head">Loss gradient → network update</text>
+    <text x="66" y="393" class="math">L<tspan baseline-shift="sub" font-size="11">SAGE</tspan> = 1/K Σ<tspan baseline-shift="sub" font-size="11">k</tspan> L<tspan baseline-shift="super" font-size="11">k</tspan>(y<tspan baseline-shift="super" font-size="11">k</tspan>, q<tspan baseline-shift="super" font-size="11">k</tspan>)</text>
+    <text x="66" y="430" class="math">∂L/∂φ = Σ<tspan baseline-shift="sub" font-size="11">k</tspan> (∂L/∂q)(∂q/∂θ)(∂g<tspan baseline-shift="sub" font-size="11">φ</tspan>/∂φ)</text>
+    <text x="66" y="463" class="body">One gradient step improves parameter regionalization</text>
+    <text x="66" y="481" class="body">across the complete basin sample.</text>
+  </g>
+
+  <!-- Central network brain -->
+  <g transform="translate(700,267)" filter="url(#shadow)">
+    <path d="M-112,-16 C-130,-80 -80,-145 -18,-126 C10,-154 75,-139 83,-99 C132,-81 137,-19 108,9 C122,67 72,126 16,112 C-22,143 -88,118 -91,72 C-132,49 -139,2 -112,-16 Z" fill="#fff" stroke="url(#brain)" stroke-width="5"/>
+    <g class="net">
+      <line x1="-80" y1="-63" x2="-32" y2="-91"/><line x1="-80" y1="-63" x2="-53" y2="-13"/><line x1="-32" y1="-91" x2="18" y2="-72"/><line x1="-53" y1="-13" x2="18" y2="-72"/><line x1="-53" y1="-13" x2="-18" y2="37"/><line x1="18" y1="-72" x2="66" y2="-41"/><line x1="18" y1="-72" x2="33" y2="-12"/><line x1="66" y1="-41" x2="79" y2="19"/><line x1="33" y1="-12" x2="79" y2="19"/><line x1="33" y1="-12" x2="22" y2="53"/><line x1="-18" y1="37" x2="22" y2="53"/><line x1="-18" y1="37" x2="-56" y2="74"/><line x1="22" y1="53" x2="61" y2="77"/><line x1="-56" y1="74" x2="0" y2="93"/><line x1="0" y1="93" x2="61" y2="77"/>
+    </g>
+    <g>
+      <circle class="node" cx="-80" cy="-63" r="9" fill="#1676b8"/><circle class="node" cx="-32" cy="-91" r="9" fill="#198fc0"/><circle class="node" cx="-53" cy="-13" r="9" fill="#22a695"/><circle class="node" cx="18" cy="-72" r="9" fill="#62b65b"/><circle class="node" cx="66" cy="-41" r="9" fill="#e7a72c"/><circle class="node" cx="33" cy="-12" r="9" fill="#ef8b35"/><circle class="node" cx="79" cy="19" r="9" fill="#df5955"/><circle class="node" cx="-18" cy="37" r="9" fill="#4d80ce"/><circle class="node" cx="22" cy="53" r="9" fill="#6f4cc3"/><circle class="node" cx="-56" cy="74" r="9" fill="#3d79bd"/><circle class="node" cx="0" cy="93" r="9" fill="#5962c4"/><circle class="node" cx="61" cy="77" r="9" fill="#7d4ebb"/>
+    </g>
+    <ellipse cx="0" cy="3" rx="48" ry="27" fill="#fff" stroke="#24465d" stroke-width="2"/>
+    <text x="0" y="11" text-anchor="middle" style="font:700 22px Arial,sans-serif;fill:#17384b">SAGE</text>
+  </g>
+
+  <!-- Four-step circulation -->
+  <path class="flow" d="M394 174 C480 113 536 105 579 123"/>
+  <path class="flow" d="M821 123 C870 105 931 115 1005 174"/>
+  <path class="flow" d="M1006 397 C926 452 866 452 818 424"/>
+  <path class="flow" d="M581 424 C526 452 466 448 395 397"/>
+  <text x="473" y="119" class="small">parameters θ</text><text x="881" y="119" class="small">simulate</text>
+  <text x="880" y="464" class="small">sensitivities</text><text x="463" y="464" class="small">update φ</text>
+</svg>

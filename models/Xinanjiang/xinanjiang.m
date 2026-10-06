@@ -834,17 +834,14 @@ function [dxdt,dSdt,Jth_f,Jx_f] = xinanjiang_odefcn(t,x,Smat,f_p,A_im, ...  % co
         dE_dc = 0.0;
         dE_dW = Ea / LM;
     else % W < c*LM
-        E0 = c * Ea;
-        W_phi = 1;
-        % Water-limiting factor near W = 0
-        phiW = W / (W + W_phi);             % ~1 for big W, ~0 near W=0
-        dphi_dW = W_phi / (W + W_phi)^2;
-        % Scaled evaporation
-        E = E0 * phiW;
-        % Derivatives
-        dE_dW = E0 * dphi_dW;               % since E0 independent of W here
-        dE_dc = Ea * phiW;                  % scale by phiW
-        dE_df_p = (c * Ep) * phiW;          % scale by phiW (Ea depends on f_p)
+        % Preserve continuity at W = c*LM. A former water-limiting factor
+        % W/(W+1) was applied only in this branch, which introduced a jump
+        % at the moving c*LM boundary. Finite differences then included the
+        % displaced jump whereas the analytic tangent did not.
+        E = c * Ea;
+        dE_dW = 0.0;
+        dE_dc = Ea;
+        dE_df_p = c * Ep;
         dE_dLM = 0.0;
     end
 

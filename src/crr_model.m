@@ -228,13 +228,24 @@ function [loss_value,out] = crr_model(x,mdl,dat,ode,loss,request)
             else
                 q = modelFcn(x,mdl,dat.meteo,ode_model);
             end
-        case 99
+        case 12
+            modelFcn = str2func('mcp_salo');
             if needStates
-                [q,J,Jth,Z] = user_model(x,mdl,dat.meteo,ode_model);
+                [q,J,Jth,Z] = modelFcn(x,mdl,dat.meteo,ode_model);
             elseif needJ
-                [q,J] = user_model(x,mdl,dat.meteo,ode_model);
+                [q,J] = modelFcn(x,mdl,dat.meteo,ode_model);
             else
-                q = user_model(x,mdl,dat.meteo,ode_model);
+                q = modelFcn(x,mdl,dat.meteo,ode_model);
+            end
+        case 99
+            userFolderCleanup = sage_user_model_runtime_scope(mdl); %#ok<NASGU>
+            userData = local_user_model_data(dat);
+            if needStates
+                [q,J,Jth,Z] = user_model(x,mdl,userData,ode_model);
+            elseif needJ
+                [q,J] = user_model(x,mdl,userData,ode_model);
+            else
+                q = user_model(x,mdl,userData,ode_model);
             end
         otherwise
             error('I do not know this model');
@@ -723,8 +734,13 @@ function [loss_value,out] = local_named_evaluation( ...
                     'Private gchm is not on the MATLAB path.');
             end
             result = modelFcn(x,mdl,dat.meteo,ode,0,modelRequest);
+        case 12
+            modelFcn = str2func('mcp_salo');
+            result = modelFcn(x,mdl,dat.meteo,ode,0,modelRequest);
         case 99
-            result = user_model(x,mdl,dat.meteo,ode,0,modelRequest);
+            userFolderCleanup = sage_user_model_runtime_scope(mdl); %#ok<NASGU>
+            result = user_model(x,mdl,local_user_model_data(dat), ...
+                ode,0,modelRequest);
         otherwise
             error('crr_model:UnknownModel', ...
                 'Unknown model number %d.',mdl.model);
@@ -736,6 +752,16 @@ function [loss_value,out] = local_named_evaluation( ...
     out.metrics = struct();
     if isfield(result,'obs') && isfield(result.obs,'Q')
         out.q = result.obs.Q;
+    end
+end
+
+function data = local_user_model_data(dat)
+%LOCAL_USER_MODEL_DATA Preserve the legacy meteo interface and expose
+% basin-level auxiliary inputs declared by AI-assisted models.
+
+    data = dat.meteo;
+    if isfield(dat,'hydro') && isstruct(dat.hydro)
+        data.hydro = dat.hydro;
     end
 end
 

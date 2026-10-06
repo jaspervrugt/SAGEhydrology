@@ -4,8 +4,8 @@ function [dat,aux] = read_meteo(region,dirM,bas,split,meteo)
 %
 %  Select the meteorological schema for REGION and read basin forcing data.
 %  The schema maps regional files, variables, and units to the common SAGE
-%  data structure; it can also supply observed discharge or snow water
-%  equivalent when those variables are available in the source dataset.
+%  data structure; it can also supply observed discharge, snow water
+%  equivalent, or soil moisture when available in the source dataset.
 %
 % SYNOPSIS:
 %   [dat,aux] = read_meteo(region,dirM,bas,split,meteo)
@@ -19,6 +19,7 @@ function [dat,aux] = read_meteo(region,dirM,bas,split,meteo)
 %                    'CAMELS_BR'  = Brazil
 %                    'CAMELS_CA'  = Canada
 %                    'CAMELS_CH'  = Switzerland
+%                    'HYD_RESPONSES' = Switzerland HYD-RESPONSES
 %                    'CAMELS_CL'  = Chile
 %                    'CAMELS_COL' = Colombia
 %                    'CAMELS_CZ'  = Czechia
@@ -72,6 +73,11 @@ function [dat,aux] = read_meteo(region,dirM,bas,split,meteo)
 %      .bad            invalid-SWE mask
 %      .units          SWE units (mm)
 %      .source         source dataset description
+%     .SM             root-zone soil-water storage, when available
+%      .value          observed SM (mm); empty when unavailable
+%      .bad            invalid-SM mask
+%      .units          SM units (mm)
+%      .source         source dataset and derivation description
 %     .Q              discharge, when included in the meteo schema
 %    .gauge          gauge/catchment identifier
 %    .fname          source file names

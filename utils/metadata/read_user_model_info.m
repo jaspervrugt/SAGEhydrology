@@ -62,6 +62,55 @@ if isfield(mdl,'root')
 else
     udir = user_model_dir_from_root(pwd);
 end
+
+% The installed manifest is authoritative for the authored model name.
+% Refresh it whenever metadata is loaded so a long-lived GUI session cannot
+% run a replacement AI model under the previous candidate's name.
+manifestFile = fullfile(udir,'ai_model_manifest.json');
+mdl.ai_requires_kosugi = false;
+mdl.ai_requires_dual_kosugi = false;
+if isfile(manifestFile)
+    try
+        manifest = jsondecode(fileread(manifestFile));
+        authoredName = string(manifest.model_name);
+        if isscalar(authoredName) && ~isempty(regexp(char(authoredName), ...
+                '^[A-Za-z][A-Za-z0-9_]*$', 'once'))
+            mdl.name = char(authoredName);
+            if isfield(mdl,'names') && numel(mdl.names) >= 9
+                if iscell(mdl.names)
+                    mdl.names{9} = char(authoredName);
+                else
+                    mdl.names(9) = authoredName;
+                end
+            end
+        end
+    catch
+        % Existing validation reports a malformed manifest elsewhere. Keep
+        % metadata loading backward compatible when no authored name exists.
+    end
+end
+specFile = fullfile(udir,'model_specification.json');
+if isfile(specFile)
+    try
+        specification = jsondecode(fileread(specFile));
+        forcingNames = string({specification.forcing_variables.name});
+        mdl.ai_requires_kosugi = all(ismember( ...
+            ["kosugi_a","kosugi_b","kosugi_c","kosugi_p0"], ...
+            forcingNames));
+    catch
+        mdl.ai_requires_kosugi = false;
+    end
+end
+prepareFile = fullfile(udir,'user_model_prepare.cpp');
+if isfile(prepareFile)
+    try
+        prepareSource = fileread(prepareFile);
+        mdl.ai_requires_dual_kosugi = contains(prepareSource, ...
+            'data.hydro.fdc.kosugi_dual');
+    catch
+        mdl.ai_requires_dual_kosugi = false;
+    end
+end
 infoFile = fullfile(udir, ...
     'user_model_info.mat');
 
@@ -132,7 +181,7 @@ end
 d = numel(mdl.par_names);
 
 if verbose
-    fprintf(['Loaded user_model_info.mat ' ...
+    fprintf(['Loaded AI-assisted model metadata ' ...
         'with %d parameters.\n'],d);
 end
 end
@@ -214,8 +263,21 @@ if nargin < 1 ...
 end
 
 candidates = {};
+if isdeployed
+    candidates{end+1,1}=sage_runtime_asset_folder('user_model',rootDir);
+end
 
-% 1. If crr_user_model is already visible, use that folder first.
+% 1. Prefer the installed AI-assisted model bound to the configured root.
+% Path discovery may still point at the legacy GR4JB example and must not
+% override an explicitly installed AI candidate.
+if ~isdeployed && ~isempty(rootDir)
+    candidates{end+1,1} = fullfile(rootDir, ...
+        'AI_assisted_model','active');
+    candidates{end+1,1} = fullfile(rootDir, ...
+        'Software','AI_assisted_model','active');
+end
+
+% 2. If crr_user_model is already visible, retain it as a fallback.
 try
     p = which(['crr_user_model.' mexext]);
     if ~isempty(p)
@@ -224,7 +286,7 @@ try
 catch
 end
 
-% 2. Deployed executable folder.
+% 3. Deployed executable folder.
 try
     if isdeployed
         exePath = matlab.internal.language. ...
@@ -238,7 +300,7 @@ try
 catch
 end
 
-% 3. Root-based source/development locations.
+% 4. Root-based source/development locations.
 if ~isempty(rootDir)
     candidates{end+1,1} = fullfile(rootDir, ...
         'user_model');
@@ -248,7 +310,7 @@ if ~isempty(rootDir)
         'Software','user_model');
 end
 
-% 4. MATLAB current-folder fallback.
+% 5. MATLAB current-folder fallback.
 try
     candidates{end+1,1} = fullfile( ...
         pwd,'user_model');

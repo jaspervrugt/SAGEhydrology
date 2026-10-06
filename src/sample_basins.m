@@ -548,9 +548,10 @@ end
 function tf = local_requires_literal_basin_ids(fname)
 %LOCAL_REQUIRES_LITERAL_BASIN_IDS Preserve significant ID characters.
 %
-% Peru IDs such as 47E01126 and zero-prefixed CAMELSH-US and MACH-US
-% IDs must be read literally. Limit this handling to their regional
-% directories or filename prefixes so behavior elsewhere is unchanged.
+% Peru IDs such as 47E01126 and zero-prefixed CAMELSH-US, MACH-US, and
+% HYD-RESPONSES IDs must be read literally. Limit this handling to their
+% regional directories or filename prefixes so behavior elsewhere is
+% unchanged.
 
     f = upper(strrep(char(string(fname)),'/','\'));
     [~,base,~] = fileparts(f);
@@ -562,7 +563,10 @@ function tf = local_requires_literal_basin_ids(fname)
         || startsWith(upper(string(base)),"SPLIT_USH_") ...
         || contains(f,[filesep 'MACH' filesep]) ...
         || startsWith(upper(string(base)),"MACH_") ...
-        || startsWith(upper(string(base)),"SPLIT_MACH_");
+        || startsWith(upper(string(base)),"SPLIT_MACH_") ...
+        || contains(f,[filesep 'CH' filesep 'HYD' filesep]) ...
+        || startsWith(upper(string(base)),"HYD_") ...
+        || startsWith(upper(string(base)),"SPLIT_HYD_");
 
 end
 
@@ -991,9 +995,29 @@ function id_out = local_normalize_split_ids(id_in, id_univ)
         id_out = id_in;
         return
     end
+
+    % -------------------------------------------------------
+    % Case 2: the same numeric identifiers with different
+    %         zero padding (for example 00000078 versus 0078)
+    % -------------------------------------------------------
+    % Basin identifiers remain identifiers here. Perform this match before
+    % the legacy numeric/index decoder below; otherwise a valid HYD gauge
+    % such as 00000078 is misread as basin index 78.
+    id_clean = regexprep(id_in,'^0+(?=[0-9])','');
+    id_univ_clean = regexprep(id_univ,'^0+(?=[0-9])','');
+    [tf,loc] = ismember(id_clean,id_univ_clean);
+    if all(tf)
+        if numel(unique(id_univ_clean)) ~= numel(id_univ_clean)
+            error('sample_basins:splitMismatch', ...
+                ['Basin IDs are ambiguous after normalizing ' ...
+                'leading zeros.']);
+        end
+        id_out = id_univ(loc);
+        return
+    end
     
     % -----------------------------
-    % Case 2: numeric / index file
+    % Case 3: legacy numeric / index file
     % -----------------------------
     id_num = str2double(id_in);
 
@@ -1043,21 +1067,6 @@ function id_out = local_normalize_split_ids(id_in, id_univ)
 
         return
     end
-    % ------------------------------
-    % Case 3: partial match fallback
-    % ------------------------------
-    % try stripping leading zeros
-    id_clean = regexprep(id_in,'^0+','');
-    id_univ_clean = regexprep(id_univ,'^0+','');
-    
-    [tf,loc] = ismember(id_clean, ...
-        id_univ_clean);
-    
-    if all(tf)
-        id_out = id_univ(loc);
-        return
-    end
-    
     error('sample_basins:splitMismatch', ...
         ['Split file IDs do not ' ...
         'match universe IDs.']);

@@ -134,7 +134,7 @@ end
 function draw_training_only_days(ax,tTrain1,tTrain2,spinupDays)
 
     cSpin = [0.86 0.86 0.86];
-    cTrain = [0.55 0.80 0.90];
+    cTrain = local_period_color('training');
     spinupDays = max(0,round(spinupDays));
     trainDays = max(1,days(tTrain2 + days(1) - tTrain1));
 
@@ -156,9 +156,9 @@ function draw_manual_days(ax,tTrain1, ...
     tTrain2,tEval1,tEval2,spinupDays)
 
     cSpin  = [0.86 0.86 0.86];
-    cTrain = [0.55 0.80 0.90];
-    cEval  = [1.00 0.72 0.10];
-    cGap   = [0.94 0.94 0.94];
+    cTrain = local_period_color('training');
+    cEval  = local_period_color('evaluation');
+    cGap   = local_period_color('gap');
 
     T0 = min([tTrain1 tEval1]);
     T1 = max([tTrain2 tEval2]) + days(1); %#ok
@@ -244,10 +244,10 @@ function draw_block(ax,ds,de, ...
     for ii = 1:nBlocks
         if idTrain(ii)
             labels(ii+1) = "train";
-            colors{ii+1} = [0.55 0.80 0.90];
+            colors{ii+1} = local_period_color('training');
         else
             labels(ii+1) = "eval";
-            colors{ii+1} = [1.00 0.72 0.10];
+            colors{ii+1} = local_period_color('evaluation');
         end
     end
 
@@ -374,12 +374,12 @@ function draw_random_points(ax, ...
 
     plot(ax,x(idTrain),0.50*ones(1,sum(idTrain)), ...
         'o','MarkerSize',6, ...
-        'MarkerFaceColor',[0.55 0.80 0.90], ...
+        'MarkerFaceColor',local_scenario_color('tt'), ...
         'MarkerEdgeColor',[0.2 0.2 0.2]);
 
     plot(ax,x(~idTrain),0.50*ones(1,sum(~idTrain)), ...
         'o','MarkerSize',6, ...
-        'MarkerFaceColor',[1.00 0.72 0.10], ...
+        'MarkerFaceColor',local_scenario_color('te'), ...
         'MarkerEdgeColor',[0.2 0.2 0.2]);
 
 end
@@ -414,9 +414,9 @@ function draw_kfold(ax,ds, ...
     for ii = 1:nFolds
         labels(ii+1) = "fold " + string(ii);
         if ii == held
-            colors{ii+1} = [1.00 0.72 0.10];
+            colors{ii+1} = local_period_color('evaluation');
         else
-            colors{ii+1} = [0.55 0.80 0.90];
+            colors{ii+1} = local_period_color('training');
         end
     end
 
@@ -448,8 +448,8 @@ function draw_rainfall_block(ax, ...
 
     spinupDays = max(0,round(spinupDays));
     cSpin  = [0.86 0.86 0.86];
-    cTrain = [0.55 0.80 0.90];
-    cEval  = [1.00 0.72 0.10];
+    cTrain = local_period_color('training');
+    cEval  = local_period_color('evaluation');
 
     edges = [0 spinupDays];
     labels = "spin-up";
@@ -486,7 +486,7 @@ function fallback(ax,spinupDays,note)
         spinupDays+mainDays], ...
         ["spin-up","period"], ...
         {[0.86 0.86 0.86], ...
-        [0.55 0.80 0.90]},note);
+        local_period_color('training')},note);
 end
 
 function draw_blocks_days(ax, ...
@@ -570,7 +570,7 @@ function label = local_fitted_period_label(ax,label,blockWidth,fontSize)
         'FontSize',fontSize, ...
         'Interpreter','none', ...
         'Visible','off');
-    cleanupProbe = onCleanup(@()delete_valid_text(probe)); %#ok<NASGU>
+    cleanupProbe = onCleanup(@()delete_valid_text(probe));
     try
         drawnow limitrate nocallbacks
         textWidth = probe.Extent(3);
@@ -661,4 +661,14 @@ function v = getfield_safe(S,name,defaultValue)
     else
         v = defaultValue;
     end
+end
+
+function color = local_period_color(key)
+    theme = sage_visual_theme();
+    color = theme.colors.period.(key);
+end
+
+function color = local_scenario_color(key)
+    theme = sage_visual_theme();
+    color = theme.colors.scenario.(key);
 end

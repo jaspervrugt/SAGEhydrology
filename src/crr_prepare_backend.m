@@ -55,6 +55,10 @@ function [mdl,misc,status] = crr_prepare_backend(mdl,misc)
     isGCHM = strcmpi(modelName,'gchm') ...
         || (isfield(mdl,'model') ...
         && isequal(double(mdl.model),11));
+    displayName = upper(modelName);
+    if isUserModel
+        displayName = 'AI-ASSISTED MODEL';
+    end
 
     if mdl.mcode ~= 4
         misc.crr_backend = 'matlab';
@@ -75,9 +79,14 @@ function [mdl,misc,status] = crr_prepare_backend(mdl,misc)
             return
         end
     else
-        centralDetail = sprintf( ...
-            ['model %s uses the ' ...
-            'standalone interface'],modelName);
+        if isUserModel
+            centralDetail = ['the AI-assisted model uses the ' ...
+                'standalone interface'];
+        else
+            centralDetail = sprintf( ...
+                ['model %s uses the ' ...
+                'standalone interface'],modelName);
+        end
     end
 
     misc.crr_backend = 'matlab';
@@ -87,11 +96,11 @@ function [mdl,misc,status] = crr_prepare_backend(mdl,misc)
     if standaloneFlag >= 0
         if strcmp(requestedBackend,'matlab')
             status = sprintf('MATLAB router with standalone %s MEX (%s)', ...
-                upper(modelName),standaloneDetail);
+                displayName,standaloneDetail);
         else
             status = sprintf(['MATLAB router with standalone %s ' ...
                 'MEX (%s); unified backend unavailable: %s'], ...
-                upper(modelName),standaloneDetail,centralDetail);
+                displayName,standaloneDetail,centralDetail);
         end
         return
     end
@@ -107,7 +116,7 @@ function [mdl,misc,status] = crr_prepare_backend(mdl,misc)
 
     if isUserModel
         error('crr_prepare_backend:UserModelUnavailable', ...
-            ['The user_model requires a ' ...
+            ['The AI-assisted model requires a ' ...
             'compatible precompiled ' ...
              'crr_user_model MEX. %s'],standaloneDetail);
     end
@@ -115,6 +124,11 @@ function [mdl,misc,status] = crr_prepare_backend(mdl,misc)
     mdl.mcode = 1;
     misc.crr_backend = 'matlab';
     mdl.crr_backend = misc.crr_backend;
+    if isfield(mdl,'model') && isequal(double(mdl.model),12)
+        status = sprintf('MATLAB daily MCP recurrence; standalone MEX unavailable: %s', ...
+            standaloneDetail);
+        return
+    end
     status = sprintf(['MATLAB RK2; unified backend unavailable: ' ...
         '%s; standalone MEX unavailable: %s'], ...
         centralDetail,standaloneDetail);
@@ -196,7 +210,7 @@ function [tf,detail] = local_central_binary_is_current()
         if ~isempty(sourceInfo) ...
                 && sourceInfo.datenum > mexInfo.datenum
             tf = false;
-            detail = ['existing binary predates updated source code'];
+            detail = 'existing binary predates updated source code';
             return
         end
     end

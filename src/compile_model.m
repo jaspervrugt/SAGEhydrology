@@ -35,7 +35,6 @@ function [flag,status] = compile_model(mdl)
     print_status = (nargout < 2);
 
     model       = mdl.model;
-    model_names = mdl.names;
     mcode       = mdl.mcode;
 
     % Resolve selected model name from its stable identifier.
@@ -92,7 +91,11 @@ function [flag,status] = compile_model(mdl)
     % -----------------------------------------
     % Resolve model folder name and source stem
     % -----------------------------------------
-    is_user_model = strcmpi(mname,'user_model');
+    % Model 99 is the AI-assisted model. Its authored display name may be
+    % user_model, fdc_model, or another future name, so identify the
+    % standalone interface from the stable numeric model identifier.
+    is_user_model = strcmpi(mname,'user_model') ...
+        || isequal(double(model),99);
     switch lower(mname)
 
         case 'hymod'
@@ -124,8 +127,13 @@ function [flag,status] = compile_model(mdl)
             cpp_stem    = ['crr_',mname];
     end
 
-    if strcmpi(mname,'gchm')
-        dir_model = fullfile(sage_root,'private','gchm');
+    if is_user_model
+        cpp_stem = 'crr_user_model';
+    end
+
+    if ismember(lower(mname),{'gchm','mcp_salo'})
+        dir_model = fullfile(sage_root,'private',lower(mname));
+        if strcmpi(mname,'mcp_salo'), addpath(dir_model,'-begin'); end
     elseif is_user_model
         dir_model = local_user_model_dir(mdl,sage_root);
     else
@@ -146,8 +154,14 @@ function [flag,status] = compile_model(mdl)
         return
     end
 
+    if is_user_model && ~isdeployed
+        addpath(dir_model,'-begin');
+        clear user_model crr_user_model user_model_compile
+        rehash toolboxcache
+    end
+
     split_models = {'hymod','hmodel','sacsma','xinanjiang', ...
-        'gr4j','hbv','cfe_nwm','gchm'};
+        'gr4j','hbv','cfe_nwm','gchm','mcp_salo'};
     is_split_model = ismember(lower(mname),split_models);
 
     if is_user_model
@@ -165,14 +179,27 @@ function [flag,status] = compile_model(mdl)
     end
     cpp_file = fullfile(dir_model,source_names{1});
     mex_file = fullfile(dir_model,[cpp_stem,'.',mexext]);
+    if is_user_model && isdeployed && isfile(mex_file)
+        sage_prepare_deployed_user_mex(mdl);
+    end
 
     % ------------------------------------------------------------
     % 1. Best case: compiled binary already exists on hard disk
     % ------------------------------------------------------------
     binaryCurrent = isfile(mex_file);
-    if binaryCurrent && strcmpi(mname,'gchm') && ~isdeployed
+    % Rebuild any split model when one of its sources is newer than the
+    % binary. Previously this freshness check was restricted to GCHM, so a
+    % corrected built-in source could silently continue using a stale MEX.
+    if binaryCurrent && is_split_model && ~isdeployed
         binaryInfo = dir(mex_file);
-        dependencies = [source_names, {'gchm.hpp','gchm.m','read_gchm_info.m'}];
+        dependencies = source_names;
+        if strcmpi(mname,'mcp_salo')
+            dependencies = [dependencies, {'mcp_salo.hpp'}];
+        end
+        if strcmpi(mname,'gchm')
+            dependencies = [dependencies, ...
+                {'gchm.hpp','gchm.m','read_gchm_info.m'}];
+        end
         for idep = 1:numel(dependencies)
             sourceInfo = dir(fullfile(dir_model,dependencies{idep}));
             if ~isempty(sourceInfo) && sourceInfo.datenum > binaryInfo.datenum
@@ -296,7 +323,7 @@ function [flag,status] = compile_model(mdl)
     % Compile from inside the model directory
     % ------------------------------------------------------------
     old_dir    = pwd;
-    cleanupObj = onCleanup(@() cd(old_dir)); %#ok<NASGU>
+    cleanupObj = onCleanup(@() cd(old_dir));
 
     try
         cd(dir_model);
@@ -456,22 +483,35 @@ function [flag,status] = compile_model(mdl)
     %LOCAL_USER_MODEL_DIR Locate the external user-model directory.
 
         candidates = strings(0,1);
-        located = which(['crr_user_model.' mexext]);
-        if ~isempty(located)
-            candidates(end+1) = string(fileparts(located));
-        end
         if isstruct(modelInfo) ...
                 && isfield(modelInfo,'root') ...
                 && ~isempty(modelInfo.root)
             candidates(end+1) = string(fullfile( ...
+                char(string(modelInfo.root)), ...
+                'AI_assisted_model','active'));
+            candidates(end+1) = string(fullfile( ...
                 char(string(modelInfo.root)),'user_model'));
+        end
+        candidates(end+1) = string(fullfile( ...
+            fileparts(sageRoot),'AI_assisted_model','active'));
+        located = which(['crr_user_model.' mexext]);
+        if ~isempty(located)
+            candidates(end+1) = string(fileparts(located));
         end
         candidates(end+1) = string(fullfile( ...
             fileparts(sageRoot),'user_model'));
         candidates(end+1) = string(fullfile(sageRoot,'user_model'));
         candidates(end+1) = string(fullfile(pwd,'user_model'));
+        if isdeployed
+            if isfield(modelInfo,'root') && ~isempty(modelInfo.root)
+                candidates=[string(sage_runtime_asset_folder( ...
+                    'user_model',char(modelInfo.root)));candidates(:)];
+            end
+            candidates=candidates(~contains(candidates, ...
+                [filesep 'AI_assisted_model' filesep]));
+            candidates(end+1)=string(fullfile(ctfroot,'user_model'));
+        end
 
-        folder = '';
         for ii = 1:numel(candidates)
             candidate = char(candidates(ii));
             if isfolder(candidate) ...

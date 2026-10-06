@@ -1,0 +1,15 @@
+{
+  "region": "CAMELS_US",
+  "regionName": "United States (CAMELS)",
+  "file_univ": "US_499_basins.txt",
+  "file_split": "split_US_499_400_99_1.txt",
+  "mdl": {"model": 1, "mcode": 4, "calc": "parfeval", "mode": 4},
+  "bas": {"K": 499, "K_t": 400, "K_e": 99, "sample": "file", "id_attr": [1,2,4,5,6,7,9,10,16,18,32,33,34,35,36,37,38,39,45,46,47,49,50,51,52,53]},
+  "prd": {"dt": 24, "method": "manual", "dts": [1,10,2008], "dte": [30,9,2015], "des": [1,10,2000], "dee": [30,9,2008], "spinup": 365},
+  "misc": {
+    "meteo": {"data": 3, "precip": 3, "temp": 3, "pet": 1},
+    "net": {"h": [32], "tf": ["tanh"], "seed": 0},
+    "loss": {"fnc": 2, "method": 1, "n_win": 7, "M": 2, "observed": ["Q"], "weight": {"Q": 1}, "normalization": {"method": "auto"}},
+    "alg": {"method": 2, "i_max": 250, "lr": 0.01, "beta_1": 0.9, "beta_2": 0.999, "vareps": 1e-8, "wdecay": 0.0001, "clipn": 1, "lr_min": 0.0001, "lr_scheme": "constant", "lr_hold": 0.2}
+  }
+}

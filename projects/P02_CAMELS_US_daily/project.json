@@ -1,0 +1,20 @@
+{
+  "id": "P02",
+  "name": "2: CAMELS-US daily",
+  "kind": "sage",
+  "status": "ready",
+  "summary": "Daily CAMELS-US experiment with NLDAS forcing, Hymod, discharge fitting, and a prescribed 400/131 basin split.",
+  "paper_title": "SAGE: Sensitivity-Aware Learning for Rapid Training of Process-Based Hydrologic Models across Large Basin Samples",
+  "authors": "Jasper A. Vrugt¹ and Jonathan M. Frame²",
+  "abstract": "We introduce Sensitivity-Aware Gradient Estimation (SAGE), a framework for descriptor-to-parameter regionalization of catchment-lumped hydrologic models. A feedforward neural network maps static catchment attributes to a moderate-dimensional vector of hydrologic parameters. The loss derivative, hydrologic parameter sensitivities, affine parameter mapping, and network Jacobian are then combined through the chain rule to obtain gradients with respect to the network weights. The sensitivity right-hand sides are derived analytically and integrated numerically together with the governing ordinary differential equations; the resulting derivatives are therefore controlled by solver tolerances and floating-point precision. We demonstrate the framework using six conceptual rainfall--runoff models and 531 hydrologically valid catchments from the Catchment Attributes and Meteorology for Large-sample Studies (CAMELS) dataset across the contiguous United States. The compiled implementation avoids finite-difference perturbations and does not require automatic differentiation through the hydrologic time integration. We report the measured runtime and predictive performance of these SAGE experiments. For cross-basin evaluation, we introduce a dimensionless flow-duration-curve (FDC) skill score, S_fdc ∈ (-∞,1], with unity denoting exact agreement between observed and simulated flow-duration curves and zero denoting the skill of a constant-median reference. We also formulate an integrated basin loss for any positively oriented basin reward X ∈ (-∞,1], including the Nash--Sutcliffe efficiency (NSE), Kling--Gupta efficiency (KGE), and S_fdc. This score equals the mean shortfall 1-X from perfect skill and therefore uses every basin value rather than relying only on the median of the empirical distribution. Because this scalar does not retain the shape or tail location of the empirical cumulative distribution function (ECDF), we use it as a complementary distributional summary alongside the median and the full ECDF. Together, these developments provide a reproducible sensitivity-based workflow for training and evaluating attribute-conditioned, catchment-lumped hydrologic models across large-sample domains ranging from individual countries to multinational and continental regions.",
+  "reference": "Vrugt, J.A. and Frame, J.M. (2026a). SAGE: Sensitivity-Aware Learning for Rapid Training of Process-Based Hydrologic Models across Large Basin Samples. Hydrology and Earth System Sciences Discussions. Preprint: doi:10.5194/egusphere-2026-693.",
+  "paper_url": "https://egusphere.copernicus.org/preprints/2026/egusphere-2026-693/",
+  "setup_file": "setup.json",
+  "source_export": "../../examples/run_SAGE_export_hymod.m",
+  "notes": [
+    "Region: United States; dataset: CAMELS-US; resolution: daily.",
+    "Model: Hymod. Loss: generalized least squares on discharge.",
+    "Training: 01 Oct 1999 to 30 Sep 2008; evaluation: 01 Oct 1989 to 30 Sep 1999.",
+    "The source export is retained as the canonical provenance record."
+  ]
+}

@@ -199,6 +199,7 @@ function varargout = camels(nTheta,mdl,dat,bas,ode,loss,misc,d,i,dirres)
     
     if storeQ
         Qtmp = cell(1,K);
+        ObsTmp = cell(1,K);
         Qfdc = struct();
         Qfdc.id = keep_idx(:)';
         Qfdc.gauge = bas.id_gauge(keep_idx);
@@ -206,6 +207,7 @@ function varargout = camels(nTheta,mdl,dat,bas,ode,loss,misc,d,i,dirres)
         Qfdc.qy = [];
     else
         Qtmp = {};
+        ObsTmp = {};
         Qfdc = [];
     end
     
@@ -341,6 +343,10 @@ function varargout = camels(nTheta,mdl,dat,bas,ode,loss,misc,d,i,dirres)
                         single([qk(:) , ...
                         dat{k}.obs.Q.value(:)]);
                 end
+                if storeQ && keep_mask(k)
+                    ObsTmp{k} = local_retained_observations( ...
+                        outk,dat{k},loss);
+                end
     
                 for f = 1:numel(fields)
                     if isfield(metk,fields{f})
@@ -405,6 +411,10 @@ function varargout = camels(nTheta,mdl,dat,bas,ode,loss,misc,d,i,dirres)
                         Qtmp{k} = ...
                             single([qk(:) , ...
                             dat{k}.obs.Q.value(:)]);
+                    end
+                    if storeQ && keep_mask(k)
+                        ObsTmp{k} = local_retained_observations( ...
+                            outk,dat{k},loss);
                     end
     
                     if isfield(metk,'SARt')   
@@ -496,6 +506,10 @@ function varargout = camels(nTheta,mdl,dat,bas,ode,loss,misc,d,i,dirres)
                         Qtmp{k} = ...
                             single([qk(:) , ...
                             dat{k}.obs.Q.value(:)]);
+                    end
+                    if storeQ && keep_mask(k)
+                        ObsTmp{k} = local_retained_observations( ...
+                            outk,dat{k},loss);
                     end
     
                     if isfield(metk,'SARt')  
@@ -645,9 +659,9 @@ function varargout = camels(nTheta,mdl,dat,bas,ode,loss,misc,d,i,dirres)
                     & keep_mask(ids);
                 % Outputs:
                 % ids, ell_b, G_b, met_b, At_b, An_b, Aobs_b, Q_b,
-                % runtime_b
+                % Obs_b, runtime_b
                 futures(b) = parfeval(pool, ...
-                    @run_basin_batch_local,9, ...
+                    @run_basin_batch_local,10, ...
                     ids,nTheta(:,ids),mdl,dat(ids),ode, ...
                     loss,attr,storeMask_b,crr_backend);
             end
@@ -658,7 +672,7 @@ function varargout = camels(nTheta,mdl,dat,bas,ode,loss,misc,d,i,dirres)
     
             for b = 1:nBatch
                 [~,ids,ell_b,G_b,met_b,At_b, ...
-                    An_b,Aobs_b,Q_b,runtime_b] = ...
+                    An_b,Aobs_b,Q_b,Obs_b,runtime_b] = ...
                     fetchNext(futures);
                 nIds = numel(ids);
                 ell(ids) = ell_b;
@@ -683,6 +697,7 @@ function varargout = camels(nTheta,mdl,dat,bas,ode,loss,misc,d,i,dirres)
                         k = ids(jj);
                         if keep_mask(k)
                             Qtmp{k} = Q_b{jj};
+                            ObsTmp{k} = Obs_b{jj};
                         end
                     end
                 end
@@ -835,6 +850,13 @@ function varargout = camels(nTheta,mdl,dat,bas,ode,loss,misc,d,i,dirres)
             qy_keep{j} = Qtmp{kk};
         end
         Qfdc.qy = qy_keep;
+        obs_keep = cell(1,nq);
+        for j = 1:nq
+            obs_keep{j} = ObsTmp{keep_idx(j)};
+        end
+        Qfdc.observations = obs_keep;
+        Qfdc.observation_names = cellstr( ...
+            local_observation_names(loss));
     end
     
     % Present metrics through the public semantic schema. Worker-local
@@ -843,6 +865,15 @@ function varargout = camels(nTheta,mdl,dat,bas,ode,loss,misc,d,i,dirres)
         met,local_observation_names(loss));
     met.info = struct('loss_fnc',loss.fnc, ...
         'observed',{cellstr(local_observation_names(loss))});
+    if isequal(double(mdl.model),12)
+        basinNorm=vecnorm(double(G),2,1);
+        [largest,worst]=max(basinNorm,[],'omitnan');
+        met.info.gradient = struct('basin_norm',basinNorm, ...
+            'maximum_norm',largest,'worst_training_basin',worst);
+        if isfield(bas,'id_gauge') && ~isempty(worst)
+            met.info.gradient.worst_gauge=string(bas.id_gauge(worst));
+        end
+    end
     if isfield(loss,'normalization')
         met.info.normalization = loss.normalization;
     end
@@ -920,19 +951,32 @@ function met = local_package_metrics(flat,names)
         met.variable.(name).loss = struct( ...
             't',flat.(['JointL' name 't']), ...
             'e',flat.(['JointL' name 'e']));
+        met.variable.(name).diagnostic = struct( ...
+            't',local_named_diagnostic(flat,name,'t'), ...
+            'e',local_named_diagnostic(flat,name,'e'));
         met.variable.(name).performance = struct( ...
             't',local_named_performance(flat,name,'t'), ...
             'e',local_named_performance(flat,name,'e'));
         if strcmp(name,'Q')
-            met.variable.Q.diagnostic = qDiagnostic;
             if isscalar(names)
                 % The Q-only backend returns the established compact
                 % discharge metrics. Named Q_* worker fields are populated
                 % only when the multi-observation evaluator is active.
+                met.variable.Q.diagnostic = qDiagnostic;
                 met.variable.Q.performance = qPerformance;
             end
         end
     end
+end
+
+function out = local_named_diagnostic(flat,name,tag)
+%LOCAL_NAMED_DIAGNOSTIC Package residual diagnostics for one observation.
+
+    out = struct( ...
+        'SAR',flat.([name '_SAR' tag]), ...
+        'GLS',flat.([name '_GLS' tag]), ...
+        'RSS',flat.([name '_RSS' tag]), ...
+        'Huber',flat.([name '_Huber' tag]));
 end
 
 function out = local_named_performance(flat,name,tag)
@@ -1059,7 +1103,7 @@ function key = local_plot_basin_key(values)
     key(numericOnly) = regexprep(key(numericOnly),'^0+(?=[0-9])','');
 end
 
-function [ids,ell_b,G_b,met_b,At_b,An_b,Aobs_b,Q_b,runtime_b] = ...
+function [ids,ell_b,G_b,met_b,At_b,An_b,Aobs_b,Q_b,Obs_b,runtime_b] = ...
     run_basin_batch_local(ids,nTheta_b,mdl,dat_b, ...
     ode,loss,attr,storeMask_b,crr_backend)
 %RUN_BASIN_BATCH_LOCAL Worker-side batch of basin model evaluations.
@@ -1100,6 +1144,7 @@ function [ids,ell_b,G_b,met_b,At_b,An_b,Aobs_b,Q_b,runtime_b] = ...
 
     req_crr = local_crr_request(loss,attr);
     Q_b = cell(1,nb);
+    Obs_b = cell(1,nb);
     runtime_b = nan(1,nb);
 
     for jj = 1:nb
@@ -1139,6 +1184,10 @@ function [ids,ell_b,G_b,met_b,At_b,An_b,Aobs_b,Q_b,runtime_b] = ...
 
         if storeMask_b(jj) && ~isempty(qj)
             Q_b{jj} = single([qj(:),dat_b{jj}.obs.Q.value(:)]);
+        end
+        if storeMask_b(jj)
+            Obs_b{jj} = local_retained_observations( ...
+                outj,dat_b{jj},loss);
         end
 
         for f = 1:numel(fields)
@@ -1293,6 +1342,60 @@ function [loss_value,out] = local_invalid_basin_result(d,dat,request)
                 out.attribution.observed.(name) = ...
                     local_empty_attribution(d,NaN);
             end
+        end
+    end
+end
+
+function retained = local_retained_observations(out,dat,loss)
+%LOCAL_RETAINED_OBSERVATIONS Pack selected simulated/observed trajectories.
+
+    retained = struct();
+    names = local_observation_names(loss);
+    for j = 1:numel(names)
+        name = char(names(j));
+        simulated = [];
+        if isfield(out,'obs') ...
+                && isfield(out.obs,name)
+            simulated = out.obs.(name);
+        elseif strcmp(name,'Q')
+            simulated = local_output_q(out);
+        end
+        if isempty(simulated) ...
+                || ~isfield(dat,'obs') ...
+                || ~isfield(dat.obs,name) ...
+                || ~isfield(dat.obs.(name),'value')
+            continue
+        end
+        observed = dat.obs.(name).value;
+        if numel(simulated) ~= numel(observed)
+            continue
+        end
+        retained.(name) = single([simulated(:),observed(:)]);
+    end
+    if isfield(dat,'meteo') ...
+            && isstruct(dat.meteo)
+        meteoNames = {'P','Ep','T'};
+        retained.meteo = struct();
+        retainedLength = 0;
+        retainedFields = fieldnames(retained);
+        if ~isempty(retainedFields)
+            retainedLength = size(retained.(retainedFields{1}),1);
+        end
+        for j = 1:numel(meteoNames)
+            name = meteoNames{j};
+            if isfield(dat.meteo,name) ...
+                    && isnumeric(dat.meteo.(name)) ...
+                    && isvector(dat.meteo.(name))
+                values = dat.meteo.(name)(:);
+                if retainedLength > 0 ...
+                        && numel(values) > retainedLength
+                    values = values(end-retainedLength+1:end);
+                end
+                retained.meteo.(name) = single(values);
+            end
+        end
+        if isempty(fieldnames(retained.meteo))
+            retained = rmfield(retained,'meteo');
         end
     end
 end
@@ -1637,6 +1740,10 @@ function met = local_store_joint_metrics(met,names,result)
             met.(['JointL' name tag]) = R.value(j);
             met.(['JointC' name tag]) = R.contribution(j);
             if ~isempty(R.detail{j})
+                met.([name '_SAR' tag]) = R.detail{j}.SAR;
+                met.([name '_GLS' tag]) = R.detail{j}.GLS;
+                met.([name '_RSS' tag]) = R.detail{j}.RSS;
+                met.([name '_Huber' tag]) = R.detail{j}.Huber;
                 met.([name '_NSE' tag]) = R.detail{j}.NSE;
                 met.([name '_KGE' tag]) = R.detail{j}.KGE;
                 met.([name '_KGE_r' tag]) = ...
@@ -1664,23 +1771,29 @@ function fields = local_joint_metric_fields()
         'JointCQt','JointCSWEt','JointCSMt', ...
         'JointLQe','JointLSWEe','JointLSMe','JointLtot_e', ...
         'JointCQe','JointCSWEe','JointCSMe', ...
+        'Q_SARt','Q_GLSt','Q_RSSt','Q_Hubert', ...
         'Q_NSEt','Q_KGEt','Q_KGE_rt','Q_KGE_alphat', ...
         'Q_KGE_betat','Q_Dfdct','Q_Dpt','Q_Dlogpt', ...
         'Q_JKGEt','Q_JKGE_Mt','Q_JKGE_Vt','Q_JKGE_Ct', ...
+        'Q_SARe','Q_GLSe','Q_RSSe','Q_Hubere', ...
         'Q_NSEe','Q_KGEe','Q_KGE_re','Q_KGE_alphae', ...
         'Q_KGE_betae','Q_Dfdce','Q_Dpe','Q_Dlogpe', ...
         'Q_JKGEe','Q_JKGE_Me','Q_JKGE_Ve','Q_JKGE_Ce', ...
+        'SWE_SARt','SWE_GLSt','SWE_RSSt','SWE_Hubert', ...
         'SWE_NSEt','SWE_KGEt','SWE_KGE_rt','SWE_KGE_alphat', ...
         'SWE_KGE_betat','SWE_Dfdct', ...
         'SWE_Dpt','SWE_Dlogpt','SWE_JKGEt', ...
         'SWE_JKGE_Mt','SWE_JKGE_Vt','SWE_JKGE_Ct', ...
+        'SWE_SARe','SWE_GLSe','SWE_RSSe','SWE_Hubere', ...
         'SWE_NSEe','SWE_KGEe','SWE_KGE_re','SWE_KGE_alphae', ...
         'SWE_KGE_betae','SWE_Dfdce','SWE_Dpe', ...
         'SWE_Dlogpe','SWE_JKGEe','SWE_JKGE_Me', ...
         'SWE_JKGE_Ve','SWE_JKGE_Ce', ...
+        'SM_SARt','SM_GLSt','SM_RSSt','SM_Hubert', ...
         'SM_NSEt','SM_KGEt','SM_KGE_rt','SM_KGE_alphat', ...
         'SM_KGE_betat','SM_Dfdct','SM_Dpt','SM_Dlogpt', ...
         'SM_JKGEt','SM_JKGE_Mt','SM_JKGE_Vt','SM_JKGE_Ct', ...
+        'SM_SARe','SM_GLSe','SM_RSSe','SM_Hubere', ...
         'SM_NSEe','SM_KGEe','SM_KGE_re','SM_KGE_alphae', ...
         'SM_KGE_betae','SM_Dfdce','SM_Dpe','SM_Dlogpe', ...
         'SM_JKGEe','SM_JKGE_Me','SM_JKGE_Ve','SM_JKGE_Ce'};

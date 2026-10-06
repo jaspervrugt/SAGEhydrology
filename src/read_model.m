@@ -44,6 +44,15 @@ function [mdl,d] = read_model(mdl,prd,verbose)
     else
         dt = prd.dt;
     end
+
+    % Retain the active temporal resolution with the model metadata so
+    % diagnostics and exported figures can identify it without requiring
+    % a separate period structure.
+    mdl.dt = dt;
+    % Requirement flags belong to the freshly selected model, not a
+    % previously loaded AI model. Its metadata reader sets them below.
+    mdl.ai_requires_kosugi = false;
+    mdl.ai_requires_dual_kosugi = false;
     
     if verbose 
         fprintf('... Reading model information');
@@ -67,9 +76,20 @@ function [mdl,d] = read_model(mdl,prd,verbose)
             mdl,prd,false);
         if verbose
             fprintf(' ... Done\n');
-            fprintf(['      Loaded user_model_info.mat ' ...
+            fprintf(['      Loaded AI-assisted model metadata ' ...
                 'with %d parameters\n'],d);
         end
+        return
+    end
+    if mdl.model == 12
+        plugin = fullfile(fileparts(fileparts(mfilename('fullpath'))), ...
+            'private','mcp_salo');
+        if isdeployed || ~isfile(fullfile(plugin,'read_mcp_salo_info.m'))
+            error('read_model:MCPUnavailable','Private MN(DS)_SALO(5) is unavailable.');
+        end
+        addpath(plugin,'-begin');
+        readMCPInfo = str2func('read_mcp_salo_info');
+        [mdl,d] = readMCPInfo(mdl,prd,verbose);
         return
     end
     if mdl.model == 11
@@ -83,10 +103,10 @@ function [mdl,d] = read_model(mdl,prd,verbose)
         end
         readGCHMInfo = str2func('read_gchm_info');
         [mdl,d] = readGCHMInfo(mdl,prd,verbose);
-        if d ~= 36 ...
-                || numel(mdl.y0) ~= 6
+        if d ~= 30 ...
+                || numel(mdl.y0) ~= 4
             error('read_model:gchmVersion',['Model ID 11 gchm ' ...
-                'requires 36 parameters and 6 numerical states.']);
+                'requires 30 parameters and 4 numerical states.']);
         end
         return
     end

@@ -1,6 +1,5 @@
 # SAGE outputs and external data
-results/*
-!results/.gitkeep
+results/
 Data/
 cache/
 release/
@@ -37,3 +36,9 @@ codegen/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# Private development and release staging
+private/
+AI_assisted_model/
+utils/ai/
+.codex-work/

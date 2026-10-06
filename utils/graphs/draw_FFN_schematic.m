@@ -42,6 +42,8 @@ function draw_FFN_schematic(ax,nIn,nHidden,nOut,tf,selectedOutputLabel)
     end
 
     cla(ax,'reset');
+    theme = sage_visual_theme();
+    sage_apply_axes_theme(ax,theme,'gui');
     hold(ax,'on');
     axis(ax,[0 1 0 1]);
     axis(ax,'off');

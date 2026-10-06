@@ -1,0 +1,20 @@
+{
+  "id": "P03",
+  "name": "3: CAMELS-US hourly",
+  "kind": "sage",
+  "status": "ready",
+  "summary": "Hourly CAMELS-US experiment using NLDAS forcing and the prescribed 400/99 split of 499 publication basins.",
+  "paper_title": "Hourly Large-Sample Hydrologic Modeling with SAGE: Performance, Regionalization, and Parameter Transfer across Temporal Scales",
+  "authors": "Jasper A. Vrugt, Jonathan M. Frame and Yifu Gao",
+  "abstract": "In previous work, we introduced the analytic-gradient theory underlying Sensitivity-Aware Gradient Estimation (SAGE) and demonstrated its application to continental-scale hydrologic model training using daily data. Here, we extend SAGE to hourly large-sample hydrology, where multi-year records and hundreds of basins substantially increase the computational and memory demands of gradient-based learning. SAGE propagates analytically derived forward sensitivities through the governing ordinary differential equations and combines the resulting hydrologic Jacobians with an attribute-to-parameter neural network. This avoids finite-difference perturbations and reverse-mode automatic differentiation through the complete simulation history, while retaining numerical control through the integration tolerances. We apply the framework to 16 years of hourly meteorological forcing and discharge observations for 499 catchments from the Catchment Attributes and Meteorology for Large-sample Studies dataset across the contiguous United States. The experiments comprise one year of model spin-up, seven years of training, and eight years of independent temporal evaluation. We consider six conceptual rainfall–runoff models and evaluate their performance under temporal, spatial, and spatiotemporal validation. Depending on model structure, one SAGE iteration over all 499 catchments requires approximately 100–250 seconds on an eight-core desktop processor, demonstrating that attribute-conditioned training at hourly resolution is computationally feasible on modest hardware. Hourly performance is broadly consistent with the corresponding daily experiments, although basin-wise Nash–Sutcliffe efficiency distributions are shifted downward by approximately 0.1. Xinanjiang attains the strongest overall predictive performance and spatial generalization, whereas HBV generalizes comparatively poorly. Cross-resolution experiments further show that model parameters are not invariant to temporal resolution: transferring parameters between daily and hourly simulations generally reduces predictive skill, with parameters inferred from hourly data transferring more successfully to daily simulations than daily parameters transfer to hourly simulations. These results establish SAGE as a practical framework for hourly large-sample hydrologic modeling and demonstrate that temporal resolution affects both parameter inference and transferability.",
+  "reference": "Vrugt, J.A., Frame, J.M., and Gao, Y. (2026b). Continental-Scale Hydrologic Model Training at Hourly Resolution with Sensitivity-Aware Gradient Estimation. In preparation.",
+  "paper_url": "",
+  "setup_file": "setup.json",
+  "source_export": "run_SAGE_export_project_03.m",
+  "notes": [
+    "Region: United States; dataset: CAMELS-US; resolution: hourly.",
+    "Meteorological forcing: NLDAS. Model: Hymod. Data type: discharge.",
+    "Basins: prescribed file split with 400 training and 99 evaluation basins.",
+    "Training: 01 Oct 2008 to 30 Sep 2015; evaluation: 01 Oct 2000 to 30 Sep 2008."
+  ]
+}

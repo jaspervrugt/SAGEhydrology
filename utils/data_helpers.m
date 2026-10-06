@@ -140,9 +140,9 @@ function out = local_kr_install(action,varargin)
         out = files; 
         return; 
     end
-    here = fullfile(fileparts(fileparts(mfilename('fullpath'))), ...
-        'regions','KR','KR');
-    ids = strip(readlines(fullfile(here,'KR_282_basins.txt')));
+    inventory = sage_region_inventory_file('KR_282_basins.txt', ...
+        fileparts(fileparts(mfilename('fullpath'))));
+    ids = strip(readlines(inventory));
     ids = ids(strlength(ids)>0);
     assert(numel(ids) == 282 ...
         && numel(unique(ids)) == 282, ...
@@ -487,8 +487,8 @@ function [tf,reason] = local_ru_complete(root,required)
 end
 
 function file = local_ru_inventory_file()
-    file = fullfile(fileparts(fileparts(mfilename('fullpath'))), ...
-        'regions','RU','RU_1886_basins.txt');
+    file = sage_region_inventory_file('RU_1886_basins.txt', ...
+        fileparts(fileparts(mfilename('fullpath'))));
 end
 
 function file = local_ru_find_file(root,name)
@@ -639,6 +639,7 @@ function tf = local_supports(region,stream)
                 'CAMELS_BR', ...
                 'CAMELS_CL', ...
                 'CAMELS_CH', ...
+                'HYD_RESPONSES', ...
                 'CAMELS_COL', ...
                 'CAMELS_DK', ...
                 'CAMELS_ES', ...
@@ -817,6 +818,13 @@ function ok = local_has_stream(cfg,stream)
                 {'CAMELS_CH_obs_based_*.csv'}) > 0 ...
                 && local_count_files(dSim, ...
                 {'CAMELS_CH_sim_based_*.csv'}) > 0;
+
+        case 'HYD_RESPONSES'
+            d = fullfile(dirD,'daily','timeseries');
+            ok = strcmp(stream,'daily') ...
+                && isfolder(d) ...
+                && local_count_files(d, ...
+                {'HYDRESPONSES_basevars_catchment_*.csv'}) >= 184;
 
         case 'CAMELS_CL' % 8
             dDaily = fullfile(dirD,'daily');
@@ -1157,6 +1165,15 @@ function ok = local_has_metadata(cfg)
             ok = local_all_files_exist(dirD, ...
                 local_ch_metadata_files());
 
+        case 'HYD_RESPONSES'
+            ok = local_all_files_exist(dirD,{ ...
+                'HYDRESPONSES_descriptive_baseflowindex.csv', ...
+                'HYDRESPONSES_descriptive_climatological_info.csv', ...
+                'HYDRESPONSES_descriptive_delayedflowindex.csv', ...
+                'HYDRESPONSES_descriptive_general_station_information.csv', ...
+                'HYDRESPONSES_descriptive_hydro_geological_terrestrial_info.csv', ...
+                'HYDRESPONSES_descriptive_Q347.csv'});
+
         case 'CAMELS_CL' %6
             ok = isfile(fullfile(dirD, ...
                 '1_CAMELScl_attributes.txt'));
@@ -1347,6 +1364,9 @@ function out = local_download(cfg,stream,ui)
 
         case 'CAMELS_CH' %5
             out = local_download_ch(cfg,stream,ui);
+
+        case 'HYD_RESPONSES'
+            out = local_download_hyd_responses(cfg,stream,ui);
 
         case 'CAMELS_CL' %6
             out = local_download_cl(cfg,stream,ui);
@@ -2494,6 +2514,208 @@ function out = local_download_cl(cfg,stream,ui)
     end
 end
 
+
+% ========================================================
+function out = local_download_hyd_responses(cfg,stream,ui)
+% ========================================================
+%LOCAL_DOWNLOAD_HYD_RESPONSES Install the official Zenodo v3 archive.
+
+    logFcn = local_ui_log(ui);
+    if ~strcmp(stream,'daily')
+        error('data_helpers:HYDResponsesOnlyDaily', ...
+            'HYD-RESPONSES support is daily only.');
+    end
+    dirD = local_cfg_dirD(cfg,'HYD_RESPONSES');
+    if ~local_ui_confirm(ui, ...
+            'Download Switzerland HYD-RESPONSES data', ...
+            ['HYD-RESPONSES v3 is a 3.52 GB Zenodo ZIP archive. ' ...
+            'Installation retains its published data directory, ' ...
+            '184 daily basin files, descriptor tables, and geometries.' ...
+            newline 'Continue?'])
+        out = struct('ok',false,'canceled',true);
+        return
+    end
+
+    downloadDir = local_default_download_dir();
+    zipFile = fullfile(downloadDir,'HYD_RESPONSES_v3.zip');
+    url = ['https://zenodo.org/records/20054998/files/' ...
+        'HYD_RESPONSES_v3.zip?download=1'];
+    expectedBytes = 3523866981;
+    expectedMD5 = '6d7e335728d8304f34d02b00695e5f7d';
+    userCanceled = false;
+    lastUI = tic;
+    d = local_progress_dialog(ui, ...
+        'Downloading HYD-RESPONSES', ...
+        'Starting the HYD-RESPONSES v3 download ...');
+    try
+        if local_hyd_responses_install_complete(dirD)
+            logFcn('HYD-RESPONSES appears complete; skipping installation.');
+            out = local_hyd_responses_result(true,dirD,'','');
+            local_close_progress(d);
+            return
+        end
+        partFile = [zipFile '.part'];
+        if ~isfile(zipFile) ...
+                && isfile(partFile)
+            partInfo = dir(partFile);
+            if partInfo.bytes <= expectedBytes
+                [moved,message] = movefile(partFile,zipFile,'f');
+                if ~moved
+                    error('data_helpers:HYDResponsesResumeFile', ...
+                        ['Could not prepare the retained partial archive ' ...
+                        'for resuming: %s'],message);
+                end
+            end
+        end
+        if isfile(zipFile)
+            zipInfo = dir(zipFile);
+            if zipInfo.bytes == expectedBytes
+                try
+                    local_verify_md5(zipFile,expectedMD5,logFcn);
+                    logFcn(['Using verified existing file: ' zipFile]);
+                catch
+                    logFcn(['Existing HYD-RESPONSES ZIP failed MD5; ' ...
+                        'downloading a clean copy.']);
+                    delete(zipFile);
+                end
+            elseif zipInfo.bytes < expectedBytes
+                logFcn(sprintf(['Resuming HYD-RESPONSES download at ' ...
+                    '%.2f of %.2f GB.'],zipInfo.bytes/1e9, ...
+                    expectedBytes/1e9));
+            else
+                logFcn(['Existing HYD-RESPONSES ZIP is larger than the ' ...
+                    'official archive; downloading a clean copy.']);
+                delete(zipFile);
+            end
+        end
+        if ~isfile(zipFile) ...
+                || dir(zipFile).bytes < expectedBytes
+            logFcn(['Downloading HYD-RESPONSES archive to: ' zipFile]);
+            local_download_file_range_resume(url,zipFile, ...
+                expectedBytes,'HYD-RESPONSES',d, ...
+                @() userCanceled,@(info) ui_progress(info),logFcn, ...
+                16*1024^2);
+        end
+        if userCanceled
+            out = struct('ok',false,'canceled',true);
+            local_close_progress(d);
+            return
+        end
+        local_verify_md5(zipFile,expectedMD5,logFcn);
+        unzipDir = tempname(downloadDir);
+        local_mkdir(unzipDir);
+        logFcn(['Unzipping HYD-RESPONSES to: ' unzipDir]);
+        if ~isempty(d) ...
+                && isvalid(d)
+            d.Indeterminate = true;
+            d.Message = ['Unzipping the HYD-RESPONSES archive. ' ...
+                'This can take several minutes ...'];
+            drawnow limitrate nocallbacks
+        end
+        unzip(zipFile,unzipDir);
+        q = dir(fullfile(unzipDir,'**', ...
+            'HYDRESPONSES_descriptive_general_station_information.csv'));
+        q = q(~[q.isdir]);
+        if numel(q) ~= 1
+            error('data_helpers:HYDResponsesArchiveLayout', ...
+                ['Expected exactly one HYD-RESPONSES descriptor tree ' ...
+                'inside the archive; found %d.'],numel(q));
+        end
+        dataDir = fileparts(q(1).folder);
+        if ~strcmpi(local_last_path_component(dataDir),'data')
+            error('data_helpers:HYDResponsesDataFolder', ...
+                'Could not resolve the published HYD_RESPONSES/data folder.');
+        end
+        local_install_hyd_responses_layout(dataDir,dirD,logFcn);
+        out = local_hyd_responses_result( ...
+            local_hyd_responses_install_complete(dirD), ...
+            dirD,zipFile,unzipDir);
+        if out.ok
+            logFcn(['HYD-RESPONSES installation finished: 184 daily ' ...
+                'basin files and six descriptor tables are available.']);
+            local_cleanup_download_file(zipFile,logFcn);
+            local_cleanup_download_folder(unzipDir,logFcn);
+            out.archive = '';
+            out.unzipDir = '';
+        else
+            error('data_helpers:HYDResponsesIncomplete', ...
+                'The installed HYD-RESPONSES inventory is incomplete.');
+        end
+    catch ME
+        logFcn('HYD-RESPONSES installation failed:');
+        logFcn(ME.message);
+        out = struct('ok',false,'error',ME.message);
+    end
+    local_close_progress(d);
+
+    function ui_progress(info)
+        [userCanceled,lastUI] = local_update_progress_dialog( ...
+            d,info,lastUI,userCanceled);
+    end
+end
+
+function out = local_hyd_responses_result(ok,dirD,archive,unzipDir)
+    series = fullfile(dirD,'daily','timeseries');
+    out = struct('ok',ok,'region','HYD_RESPONSES','dirD',dirD, ...
+        'dirM',series,'dirQ',series,'archive',archive, ...
+        'unzipDir',unzipDir);
+end
+
+function tf = local_hyd_responses_install_complete(dirD)
+    dSeries = fullfile(dirD,'daily','timeseries');
+    tf = isfolder(dSeries) ...
+        && local_count_files(dSeries, ...
+        {'HYDRESPONSES_basevars_catchment_*.csv'}) >= 184 ...
+        && local_all_files_exist(dirD,{ ...
+        'HYDRESPONSES_descriptive_baseflowindex.csv', ...
+        'HYDRESPONSES_descriptive_climatological_info.csv', ...
+        'HYDRESPONSES_descriptive_delayedflowindex.csv', ...
+        'HYDRESPONSES_descriptive_general_station_information.csv', ...
+        'HYDRESPONSES_descriptive_hydro_geological_terrestrial_info.csv', ...
+        'HYDRESPONSES_descriptive_Q347.csv'});
+end
+
+function local_install_hyd_responses_layout(dataDir,dirD,logFcn)
+%LOCAL_INSTALL_HYD_RESPONSES_LAYOUT Normalize the published archive tree.
+
+% SAGE keeps descriptors at the regional root and places time series below
+% a resolution folder. Additional published products are retained under
+% clear, unnumbered directory names.
+
+    local_mkdir(dirD);
+    sourceTS = fullfile(dataDir,'01_timeseries');
+    mappings = { ...
+        fullfile(sourceTS,'00_meta_information'), ...
+            fullfile(dirD,'daily','metadata'); ...
+        fullfile(sourceTS,'01_base_variables'), ...
+            fullfile(dirD,'daily','timeseries'); ...
+        fullfile(sourceTS,'02_derived_variables'), ...
+            fullfile(dirD,'daily','derived_variables'); ...
+        fullfile(sourceTS,'03_anomalies'), ...
+            fullfile(dirD,'daily','anomalies'); ...
+        fullfile(sourceTS,'04_standardized_indices'), ...
+            fullfile(dirD,'daily','standardized_indices'); ...
+        fullfile(sourceTS,'05_cumulative_deficits'), ...
+            fullfile(dirD,'daily','cumulative_deficits'); ...
+        fullfile(sourceTS,'06_events_nrs'), ...
+            fullfile(dirD,'daily','event_numbers'); ...
+        fullfile(dataDir,'02_climatology'), ...
+            fullfile(dirD,'climatology')};
+    for i = 1:size(mappings,1)
+        if isfolder(mappings{i,1})
+            local_copy_folder_contents( ...
+                mappings{i,1},mappings{i,2},logFcn);
+        end
+    end
+    local_copy_pattern(fullfile(dataDir,'03_descriptive'),dirD, ...
+        {'HYDRESPONSES_descriptive_*.csv'},logFcn);
+    local_copy_pattern(dataDir,fullfile(dirD,'shapefiles'), ...
+        {'catchment_outlets.*','catchment_outlines.*'},logFcn);
+end
+
+function name = local_last_path_component(pathValue)
+    [~,name] = fileparts(char(pathValue));
+end
 
 % =============================================
 function out = local_download_ch(cfg,stream,ui)
@@ -9559,7 +9781,7 @@ function local_download_progress(progressFcn,label,bytesDone, ...
 end
 
 function local_download_file_range_resume(url,targetFile,totalBytes, ...
-    label,~,cancelFcn,progressFcn,logFcn)
+    label,~,cancelFcn,progressFcn,logFcn,chunkBytes)
 %LOCAL_DOWNLOAD_FILE_RANGE_RESUME Resume a large file in HTTP byte ranges.
 % Completed chunks are appended immediately, so an interrupted transfer
 % can continue from the current file size without discarding prior data.
@@ -9575,8 +9797,11 @@ function local_download_file_range_resume(url,targetFile,totalBytes, ...
     if nargin < 6 || isempty(cancelFcn)
         cancelFcn=@()false;
     end
+    if nargin < 9 ...
+            || isempty(chunkBytes)
+        chunkBytes=64*1024^2;
+    end
 
-    chunkBytes=64*1024^2;
     maxTries=5;
     uri=URI(char(string(url)));
     targetFile=char(string(targetFile));
@@ -10292,6 +10517,12 @@ function d = local_stream_dir(cfg,stream)
             else
                 d = '';
             end
+        case 'HYD_RESPONSES'
+            if strcmp(stream,'daily')
+                d = fullfile(dirD,'daily','timeseries');
+            else
+                d = '';
+            end
         case 'CAMELS_COL'
             if strcmp(stream,'daily')
                 d = fullfile(dirD,'daily', ...
@@ -10491,6 +10722,10 @@ function name = local_region_name(region)
         name = 'United States / MACH';
         return
     end
+    if strcmp(r,'HYD_RESPONSES')
+        name = 'Switzerland / HYD-RESPONSES';
+        return
+    end
     if any(strcmp(r,{'CAMELS_ZA','CAMELS_NA','CAMELS_AR','CAMELS_BE', ...
             'CAMELS_EE','CAMELS_IE','CAMELS_JM','CAMELS_NO','CAMELS_PR'}))
         name=[region_helpers('name',r) ' / GRDC-Caravan']; return
@@ -10538,7 +10773,11 @@ function [userCanceled,lastUI] = ...
         return
     end
     
-    if toc(lastUI) < 0.25
+    isInitial = isfield(info,'frac') ...
+        && isfinite(info.frac) ...
+        && info.frac <= 0;
+    if toc(lastUI) < 0.25 ...
+            && ~isInitial
         return
     end
     lastUI = tic;

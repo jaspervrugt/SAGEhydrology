@@ -1,0 +1,25 @@
+{
+  "id": "P01",
+  "name": "1: Analytic gradients and Jacobians",
+  "kind": "standalone",
+  "status": "ready",
+  "summary": "WRR study introducing analytic gradients for ODE-based hydrologic models, verified with the Leaf River near Collins, Mississippi; French Broad River at Asheville, North Carolina; and the Wye and Severn catchments at Plynlimon, Wales.",
+  "paper_title": "Reclaiming First Principles: An Analytic Differentiable Framework for Conceptual Hydrologic Models",
+  "authors": "Jasper A. Vrugt, Jonathan M. Frame and Ethan Bollman",
+  "abstract": "Conceptual hydrologic models remain the cornerstone of rainfall-runoff modeling, yet their calibration is often slow and numerically fragile. Most gradient-based parameter estimation methods rely on finite-difference approximations or automatic differentiation frameworks (e.g., JAX, PyTorch and TensorFlow), which are computationally demanding and introduce truncation errors, solver instabilities, and substantial overhead. These limitations are particularly acute for the ODE systems of conceptual watershed models. Here we introduce a fully analytic and computationally efficient framework for differentiable hydrologic modeling based on exact parameter sensitivities. By augmenting the governing ODE system with sensitivity equations, we jointly evolve the model states and the Jacobian matrix with respect to all parameters. This Jacobian then provides fully analytic gradient vectors for any differentiable loss function. These include classical objective functions such as the sum of absolute and squared residuals, widely used hydrologic performance metrics such as the Nash-Sutcliffe and Kling-Gupta efficiencies, robust loss functions that down-weight extreme events, and hydrograph-based functionals such as flow-duration and recession curves. The analytic sensitivities eliminate the step-size dependence and noise inherent to numerical differentiation, while avoiding the instability of adjoint methods and the overhead of modern machine-learning autodiff toolchains. The resulting gradients are deterministic and straightforward to embed in gradient-based optimizers, while the underlying Jacobian matrix provides physically interpretable parameter sensitivities. Overall, this work enables rapid, stable, and transparent gradient-based calibration of conceptual hydrologic models, unlocking the full potential of differentiable modeling providing an efficient alternative to automatic-differentiation frameworks for conceptual hydrologic models.",
+  "reference": "Vrugt, J.A., Frame, J.M., and Bollman, E. (2026a). Reclaiming First Principles: An Analytic Differentiable Framework for Conceptual Hydrologic Models. Water Resources Research. Preprint: arXiv:2602.06429.",
+  "paper_url": "https://arxiv.org/abs/2602.06429",
+  "entry_point": "../../examples/verify_jacobians_and_gradients.m",
+  "source_export": "../../examples/verify_jacobians_and_gradients.m",
+  "notes": [
+    "This study does not use the standard run_SAGE training pipeline.",
+    "Open project launches a self-contained Jacobian and gradient verification script based on the four catchments used in the WRR paper.",
+    "Data note: French Broad River at Asheville (USGS 03451500) is distributed with Project 1 as a MOPEX benchmark record spanning 01 January 1960 through 31 December 1966; the default verification period is 01 October 1961 through 30 September 1964.",
+    "Data note: Leaf River near Collins (USGS 02472000) is read from the installed CAMELS-US daily product with Maurer meteorological forcing. Its source record spans 01 October 1980 through 30 September 2008; the default verification period is 01 October 1981 through 30 September 1984. Users must install CAMELS-US from the Region tab.",
+    "Data note: Wye at Cefn Brwyn (CAMELS-GB 55008) and Severn at Plynlimon flume (CAMELS-GB 54022) use precipitation and discharge from the installed CAMELS-GB hourly product, spanning 01 October 1990 through 01 October 2022. Daily CAMELS-GB PET is divided over the corresponding hours. The default verification period is 01 October 1993 through 30 September 1994. Users must install both CAMELS-GB daily and hourly from the Region tab.",
+    "The public CAMELS-GB discharge records closely match the 1992-1996 workbook supplied by Prof. Jim Kirchner. Its precipitation differs because the workbook likely uses locally measured experimental-catchment rainfall whereas CAMELS-GB uses gridded CEH-GEAR precipitation; CAMELS-GB hourly also lacks hourly PET, which Project 1 derives reproducibly from CAMELS-GB daily data.",
+    "The script compares analytic discharge sensitivities, fixed-step central differences, and D'Errico adaptive Richardson estimates.",
+    "The default N = 10 reproduces the paper's Monte Carlo design.",
+    "The required jacobianest, gradest, and derivest routines are bundled under Project 1 with their BSD-style license, so loading or running the project does not download third-party code."
+  ]
+}
