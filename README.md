@@ -25,27 +25,16 @@ The SAGE GUI can automatically download, extract, organize, and register the sup
 ## Repository contents
 
 ```text
-
 docs/                    Documentation graphics and model schematics
-
 examples/                Three public MATLAB examples, including demo_SAGE.mlx
-
 flags/                   Regional flag assets
-
 maps/                    Map assets and Natural Earth metadata
-
 models/                  Hydrologic models and analytic sensitivity kernels
-
 regions/                 Regional configuration and basin inventories
-
 projects/                Reproducible MATLAB scripts for Projects 1–5
-
 src/                     Main SAGE training and postprocessing routines
-
 utils/                   Shared readers, metrics, plotting, and utilities
-
 user_model/              Manual C++ model template and parameter metadata
-
 ```
 
 Hydrologic and meteorological datasets, run results, caches, and GUI source files are intentionally excluded.
