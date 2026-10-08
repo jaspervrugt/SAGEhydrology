@@ -1,5 +1,7 @@
 # SAGEhydrology
 
+**[Read the SAGE–SITE blog](https://jaspervrugt.github.io/SAGE-SITE-blog/)** — software updates, experiments, and research ideas.
+
 Current public release: [v1.0.3](https://github.com/jaspervrugt/SAGEhydrology/releases/tag/v1.0.3). See [release notes](docs/RELEASE_v1.0.3.md) for the Windows deployment and source changes.
 
 Sensitivity-Aware Gradient Estimation (SAGE) is a framework for scalable, attribute-conditioned training of conceptual hydrologic models using analytic forward sensitivities.
