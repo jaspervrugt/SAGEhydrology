@@ -1,0 +1,11 @@
+numpy>=1.24
+scipy>=1.10
+pandas>=2.2
+numba>=0.61
+netCDF4>=1.7
+h5py>=3.12
+pyproj>=3.7
+py7zr>=1.0
+
+matplotlib>=3.8
+certifi

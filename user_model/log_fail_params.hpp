@@ -1,6 +1,8 @@
 #pragma once
 
+#if defined(_WIN32)
 #include <io.h>
+#endif
 #include <cstdio>
 #include <string>
 #include <mutex>

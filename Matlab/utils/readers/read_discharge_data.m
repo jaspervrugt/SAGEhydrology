@@ -1,0 +1,72 @@
+function dat = read_discharge_data(dirQ,mdl,dat,bas,split,aux, ...
+    schema)                             %#ok<INUSD>
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%READ_DISCHARGE_DATA Read observed discharge using a declarative schema.
+%
+% SYNOPSIS:
+%   dat = read_discharge_data(dirQ,mdl,dat,bas,split,aux,schema)
+%
+% INPUT:
+%   dirQ       Directory containing discharge time-series files
+%   dat        Existing meteorological SAGE data
+%   bas        Basin structure
+%   split      Prepared SAGE time-split structure
+%   aux        Existing K-by-3 metadata; area is in column 3 [m2]
+%   schema     Generic discharge schema containing variables.Q
+%
+% OUTPUT:
+%   dat        Input data augmented with obs.Q.value, obs.Q.bad, and
+%              discharge metadata.
+%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% © Written by Jasper A. Vrugt, Aug. 2026                                 %
+% University of California, Irvine                                        %
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+    if nargin < 7
+        error('read_discharge_data:MissingSchema', ...
+            'A discharge schema must be provided.');
+    end
+    if nargin >= 6 && ...
+        ~isempty(aux)
+        schema.aux.values = aux;
+    end
+    schema = resolve_hydro_schema(schema,split,struct());
+    schema = validate_hydro_schema(schema,'Q');
+    if isfield(bas,'data_actions') && ...
+        ~isempty(bas.data_actions)
+        schema.data_actions = bas.data_actions;
+    end
+    if isfield(schema,'reuse_existing_q') && ...
+        schema.reuse_existing_q && ...
+        local_has_existing_q(dat)
+        return
+    end
+    options = struct();
+    if isfield(bas,'progressFcn') && ...
+        ~isempty(bas.progressFcn)
+        options.progressFcn = bas.progressFcn;
+    end
+    [dat,~] = read_hydro_timeseries( ...
+        dirQ,bas,split,options,schema,dat);
+end
+
+function tf = local_has_existing_q(dat)
+    tf = iscell(dat) && ...
+        ~isempty(dat);
+    for k = 1:numel(dat)
+        entry = dat{k};
+        hasCanonical = isstruct(entry) && ...
+            isfield(entry,'obs') && ...
+            isstruct(entry.obs) && ...
+            isfield(entry.obs,'Q') && ...
+            isstruct(entry.obs.Q) && ...
+            isfield(entry.obs.Q,'value') && ...
+            isfield(entry.obs.Q,'bad') && ...
+            numel(entry.obs.Q.value) == numel(entry.obs.Q.bad);
+        if ~hasCanonical
+            tf = false;
+            return
+        end
+    end
+end

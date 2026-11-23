@@ -84,6 +84,17 @@ static double getScalarField(const mxArray* S, const char* field, const char* wh
     return mxGetScalar(A);
 }
 
+static double configured(const mxArray* mdl,const char* name,double fallback)
+{
+    const mxArray* config=mxGetField(mdl,0,"config");
+    if(!config || !mxIsStruct(config)) return fallback;
+    const mxArray* field=mxGetField(config,0,name);
+    if(!field) return fallback;
+    double value=getScalarField(config,name,"mdl.config");
+    if(!std::isfinite(value))mexErrMsgIdAndTxt("user_model_prepare:Config","Configuration must be finite.");
+    return value;
+}
+
 static int getIntField(const mxArray* S, const char* field, const char* where)
 {
     return static_cast<int>(std::llround(getScalarField(S, field, where)));
@@ -341,16 +352,16 @@ UserModelPrepared user_model_prepare(const mxArray* par_mx,
        Define model constants and number of states
        =========================================== */
     /* User model constants */
-    const double T_sm = 1.0;
-    const double eps_m = 1e-6;
-    const double eps_s = 1e-12;
-    const double kappa = 4.0 / 9.0;
-    const double bg = 3.5;
-    const double bR = 5.0;
-    const double mts = 1.0;
-    const double eta = 2.5;
-    const double tau = 2.5;
-    const double rho = 1e-2;
+    const double T_sm = configured(mdl,"T_sm",1.0);
+    const double eps_m = configured(mdl,"eps_m",1e-6);
+    const double eps_s = configured(mdl,"eps_s",1e-12);
+    const double kappa = configured(mdl,"kappa",4.0 / 9.0);
+    const double bg = configured(mdl,"bg",3.5);
+    const double bR = configured(mdl,"bR",5.0);
+    const double mts = configured(mdl,"mts",1.0);
+    const double eta = configured(mdl,"eta",2.5);
+    const double tau = configured(mdl,"tau",2.5);
+    const double rho = configured(mdl,"rho",1e-2);
 
     if (S.d != 8) {
         mexErrMsgIdAndTxt("user_model_prepare:d",
@@ -379,15 +390,25 @@ UserModelPrepared user_model_prepare(const mxArray* par_mx,
     S.z0 = mxCreateDoubleMatrix((mwSize)S.nvar, 1, mxREAL);
     double* z0 = mxGetPr(S.z0);
 
-    double y0 = 1e-5;
-    const mxArray* y0A = mxGetField(mdl, 0, "y0");
-    if (y0A && mxGetNumberOfElements(y0A) >= 1) {
-        y0 = mxGetScalar(y0A);
+    const mxArray* y0A=mxGetField(mdl,0,"y0");
+    const mxArray* overrideY0=mxGetField(ode,0,"y0");
+    if(overrideY0 && mxGetNumberOfElements(overrideY0)>0)y0A=overrideY0;
+    std::vector<double> initial;
+    if(y0A)initial=vectorFromArray(y0A,"initial states");
+    if(initial.empty())initial.assign(S.m,1e-5);
+    // Preserve legacy metadata initialization; updated metadata supplies all stores.
+    if(initial.size()!=static_cast<size_t>(S.m)) {
+        if(overrideY0 && mxGetNumberOfElements(overrideY0)>0)
+            mexErrMsgIdAndTxt("user_model_prepare:InitialStates","Initial override has wrong length.");
+        initial.assign(S.m,initial.front());
     }
-
-    for (int i = 0; i < S.m; ++i) {
-        z0[i] = y0;
+    for(int i=0;i<S.m;++i){
+        if(!std::isfinite(initial[i]) || initial[i]<0)
+            mexErrMsgIdAndTxt("user_model_prepare:InitialStates","Initial states must be finite and nonnegative.");
+        z0[i]=initial[i];
     }
+    if(initial[1]>th[0] || initial[2]>th[2])
+        mexErrMsgIdAndTxt("user_model_prepare:InitialCapacity","Initial production/routing store exceeds its capacity.");
     for (int i = S.m; i < S.nvar; ++i) {
         z0[i] = 0.0;
     }

@@ -1,0 +1,29 @@
+function build_cart_numerics()
+%BUILD_CART_NUMERICS Build isolated shared-kernel solver gateways.
+    here = fileparts(mfilename('fullpath'));
+    root = fileparts(fileparts(here));
+    native = fullfile(root,'Native','models');
+    selected = mex.getCompilerConfigurations('C++','Selected');
+    flags = {'-O','-R2017b'};
+    if ~isempty(selected) && contains(selected.Name,'Microsoft')
+        flags{end+1} = 'COMPFLAGS=$COMPFLAGS /std:c++17';
+    else
+        flags{end+1} = 'CXXFLAGS=$CXXFLAGS -std=c++17';
+    end
+    source = fullfile(root,'Matlab','src','cart_ode_mex.cpp');
+    mex(flags{:},'-outdir',fullfile(here,'cart'), ...
+        '-output','crr_cart_numerics_v1',source);
+    mex(flags{:},'-DMATLAB_CARTPLUS', ...
+        '-outdir',fullfile(here,'cartplus'), ...
+        '-output','crr_cartplus_numerics_v1',source);
+    source = fullfile(native,'cart','crr_cart_mex.cpp');
+    mex(flags{:},'-DCART_UNIFORM_GATEWAY', ...
+        '-outdir',fullfile(here,'cart'), ...
+        '-output','crr_cart_uniform_f986af2',source);
+    source = fullfile(root,'Native','adapters','matlab', ...
+        'cartplus','crr_cartplus_mex.cpp');
+    mex(flags{:},'-DCARTPLUS_UNIFORM_INPUT','-DCART_FAST_SCALAR', ...
+        ['-I' fullfile(native,'CaRTPlus')], ...
+        '-outdir',fullfile(here,'cartplus'), ...
+        '-output','crr_cartplus_uniform_f986af2',source);
+end
