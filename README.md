@@ -4,10 +4,47 @@ Sensitivity-Aware Gradient Estimation (SAGE) trains conceptual hydrologic
 models across basins using analytic forward sensitivities and
 attribute-conditioned parameter regionalization.
 
+Follow release notes, examples, and development updates on the
+[SAGE & SITEhydrology blog](https://jaspervrugt.github.io/SAGE-SITE-blog/).
+
 This release adds headless Python alongside updated MATLAB source. Both use
 the shared public C++ kernels in `Native/`. The desktop interface is
 distributed as a separately licensed compiled application through
 [GitHub Releases](https://github.com/jaspervrugt/SAGEhydrology/releases).
+
+## What's new in 2.0.0
+
+- **Python and the updated desktop GUI.** Run SAGE from Python or MATLAB using
+  shared C++ kernels. The Python desktop app improves experiment setup, run
+  monitoring, diagnostics, and the quality and layout of exported figures and
+  PowerPoint reports.
+- **Flexible time splits.** Define training and evaluation periods, exclude dates
+  from scoring while simulating through them, and optionally reserve a separate
+  checkpoint-testing period to select the iteration used for final results.
+- **Flow-duration-curve scores.** Compare observed and simulated flow
+  distributions using new scores in probability and log-probability space.
+- **Multi-variable training.** Fit a shared model against streamflow and other
+  observations, such as soil moisture and snow water equivalent, where the model
+  and dataset support those variables.
+- **Private extensions.** Water Tracking traces simulated water through model
+  stores and flow pathways. The experimental Forecast extension uses trained
+  basin parameters and weather forecasts to predict discharge up to five days
+  ahead for supported daily CAMELS-US basins. It compares issued forecasts with
+  USGS observations as they arrive. We are refining the forecasting workflow
+  so the learned relationships can be used to forecast across more watersheds.
+
+## Configure in the GUI, run in MATLAB or Python
+
+The Python GUI is the maintained desktop interface. Development of the former
+MATLAB GUI has ended. The MATLAB computational source remains available for
+running experiments directly in MATLAB.
+
+Set up the experiment in the desktop app and choose **Export script**. Export a
+MATLAB script (`.m`), MATLAB Live Script (`.mlx`), or Python script (`.py`).
+The export captures the run configuration in an editable file you can run
+outside the GUI using the corresponding SAGE computational runtime. Run the
+whole script, execute Live Script sections individually, or step through the
+MATLAB or Python code with a debugger.
 
 ## Python
 
@@ -59,5 +96,3 @@ The public computational source uses the [BSD 3-Clause License](LICENSE).
 Keep the adjacent MIT notices for CaRT and CaRT+ and the notices for other
 third-party components. See [GUI-LICENSE-NOTICE.md](GUI-LICENSE-NOTICE.md)
 for the terms of the compiled application.
-
-[Project blog](https://jaspervrugt.github.io/SAGE-SITE-blog/#welcome)
